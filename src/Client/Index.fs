@@ -18,6 +18,7 @@ open PulumiSchema.Types
 [<ReactComponent>]
 let LocalPlugins() = 
     let plugins = React.useDeferred(todosApi.getLocalPlugins(), [| |])
+    let selectedPlugin, setSelectedPlugin = React.useState<string option>(None)
     React.fragment [
         match plugins with
         | Deferred.HasNotStartedYet -> Html.none
@@ -29,13 +30,24 @@ let LocalPlugins() =
             ]
 
         | Deferred.Resolved plugins ->
-            Html.ul [
-                for plugin in plugins -> 
-                Html.li [
-                    Html.a [
-                        prop.href (Router.format(plugin.Name, plugin.Version))
-                        prop.text $"{plugin.Name} v{plugin.Version}"
-                    ]
+            SelectSearch.selectSearch [
+                selectSearch.id "local-plugins"
+                selectSearch.placeholder "Select a local plugin"
+                selectSearch.search true
+                selectSearch.value (defaultArg selectedPlugin "")
+                selectSearch.onChange (fun (selectedPlugin: string) -> 
+                    match selectedPlugin.Split "@" with 
+                    | [| name; version |] -> 
+                        setSelectedPlugin(Some selectedPlugin)
+                        Router.navigate(name, version)
+                    | _ -> ignore()
+                )
+                selectSearch.options [
+                    for plugin in plugins -> {
+                        value = $"{plugin.Name}@{plugin.Version}"
+                        name = $"{plugin.Name} v{plugin.Version}"
+                        disabled = false
+                    }
                 ]
             ]
     ]
@@ -326,6 +338,7 @@ let View() =
                         prop.style [ 
                             style.custom("flex", "80%") 
                             style.paddingRight 30
+                            style.paddingLeft 30
                         ]
                         prop.children [
                             React.router [
