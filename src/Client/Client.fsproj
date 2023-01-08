@@ -14,8 +14,10 @@
         <ProjectReference Include="..\Shared\Shared.fsproj" />
     </ItemGroup>
     <ItemGroup>
-      <PackageReference Include="Feliz.UseDeferred" Version="1.5.0" />
-      <PackageReference Include="Feliz.Router" Version="3.10.0" />
+      <PackageReference Include="Fable.Remoting.Client" Version="7.25.0" />
+      <PackageReference Include="Feliz.UseDeferred" Version="2.0.0" />
+      <PackageReference Include="Feliz.Router" Version="4.0.0" />
+      <PackageReference Include="Feliz" Version="2.3.0" />
+      <PackageReference Include="Feliz.SelectSearch" Version="2.0.0" />
     </ItemGroup>
-    <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

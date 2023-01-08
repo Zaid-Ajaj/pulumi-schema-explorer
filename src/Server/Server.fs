@@ -66,6 +66,10 @@ let todosApi =
 let webApp =
     Remoting.createApi ()
     |> Remoting.withRouteBuilder Route.builder
+    |> Remoting.withErrorHandler (fun error routeInfo ->
+        printfn "%A" error
+        Ignore
+    )
     |> Remoting.fromValue todosApi
     |> Remoting.buildHttpHandler
 

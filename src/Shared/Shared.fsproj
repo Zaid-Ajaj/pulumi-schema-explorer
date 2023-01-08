@@ -7,7 +7,6 @@
     <Compile Include="Shared.fs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\pulumi-codegen-dotnet\PulumiSchemaTypes\PulumiSchemaTypes.fsproj" />
+    <PackageReference Include="PulumiSchemaTypes" Version="1.1.0" />
   </ItemGroup>
-  <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>

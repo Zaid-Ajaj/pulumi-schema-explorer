@@ -9,7 +9,7 @@
       ]
     },
     "fable": {
-      "version": "3.7.5",
+      "version": "4.0.0-theta-018",
       "commands": [
         "fable"
       ]
@@ -21,7 +21,7 @@
       ]
     },
     "femto": {
-      "version": "0.12.0",
+      "version": "0.16.0",
       "commands": [
         "femto"
       ]

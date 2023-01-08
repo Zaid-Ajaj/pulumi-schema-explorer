@@ -10,7 +10,9 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Shared\Shared.fsproj" />
-    <ProjectReference Include="..\..\..\pulumi-codegen-dotnet\PulumiSchema\PulumiSchema.fsproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="PulumiSchema" Version="1.1.0" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />
 </Project>
