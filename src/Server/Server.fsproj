@@ -12,6 +12,7 @@
     <ProjectReference Include="..\Shared\Shared.fsproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="Octokit" Version="0.50.0" />
     <PackageReference Include="PulumiSchema" Version="1.1.0" />
   </ItemGroup>
   <Import Project="..\..\.paket\Paket.Restore.targets" />

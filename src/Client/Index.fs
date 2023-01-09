@@ -1,23 +1,24 @@
 module Index
 
-open System
-open Fable.Remoting.Client
-open Shared
+open Feliz
 open Feliz.UseDeferred
 open Feliz.Router
 open Feliz.SelectSearch
 
-let todosApi =
+open Shared
+open PulumiSchema.Types
+open System
+open Fable.Remoting.Client
+
+let schemaExplorerApi =
     Remoting.createApi ()
     |> Remoting.withRouteBuilder Route.builder
-    |> Remoting.buildProxy<ITodosApi>
+    |> Remoting.buildProxy<ISchemaExplorerApi>
 
-open Feliz
-open PulumiSchema.Types
 
 [<ReactComponent>]
 let LocalPlugins() = 
-    let plugins = React.useDeferred(todosApi.getLocalPlugins(), [| |])
+    let plugins = React.useDeferred(schemaExplorerApi.getLocalPlugins(), [| |])
     let selectedPlugin, setSelectedPlugin = React.useState<string option>(None)
     React.fragment [
         match plugins with
@@ -241,13 +242,13 @@ let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
 
 [<ReactComponent>]
 let PluginSchemaExplorer(name: string, version: string, tab: string) = 
-    let schema = React.useDeferred(todosApi.getSchemaByPlugin { Name = name; Version = version }, [| name; version |])
+    let schema = React.useDeferred(schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, [| name; version |])
     let selectedTab, setSelectedTab = React.useState(tab)
 
     React.fragment [
         match schema with
         | Deferred.HasNotStartedYet -> Html.none
-        | Deferred.InProgress -> Html.p "Loading schema information..."
+        | Deferred.InProgress -> Html.p "Loading schema information, this may take a moment..."
         | Deferred.Failed ex -> 
             Html.p [ 
                 prop.style [ style.color "red" ]
@@ -305,6 +306,97 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
         ]
 
 [<ReactComponent>]
+let GithubReleases(repo: string) = 
+    let githubReleases = React.useDeferred(schemaExplorerApi.findGithubReleases repo, [| repo |])
+    let selectedRelease, setSelectedRelease = React.useState<string option>(None)
+    let inline searchResults() = 
+        match githubReleases with 
+        | Deferred.Resolved releases -> 
+            [
+                for release in releases -> {
+                    value = release
+                    name = release
+                    disabled = false
+                }
+            ] 
+
+        | _ -> [ ]
+
+    let options = React.useMemo(searchResults, [| githubReleases |])
+    SelectSearch.selectSearch [
+        selectSearch.id "github-releases"
+        selectSearch.placeholder (
+            if Deferred.inProgress githubReleases 
+            then "Loading releases" 
+            elif List.isEmpty options
+            then "No releases found"
+            else "Pick a release to explore"
+        )
+        selectSearch.onChange (fun version -> 
+            setSelectedRelease(Some version)
+            Router.navigate(repo.Replace("pulumi/pulumi-", ""), version)
+        )
+        selectSearch.value (defaultArg selectedRelease "")
+        selectSearch.options options
+        if not (List.isEmpty options) && selectedRelease.IsNone then
+            selectSearch.printOptions.always
+    ]
+
+[<ReactComponent>]
+let SearchGithub() = 
+    let inputRef = React.useInputRef()
+    let selectedRepo, setSelectedRepo = React.useState<string option>(None)
+    let searchResults, setSearchResults = React.useState(Deferred.HasNotStartedYet)
+    let search = React.useDeferredCallback(schemaExplorerApi.searchGithub, setSearchResults)
+
+    let inline searchResultOptions() = 
+        match searchResults with 
+        | Deferred.Resolved results -> 
+            [ for result in results -> { value = result; name = result; disabled = false } ]
+        
+        | _ -> 
+            [ ]
+
+    let options = React.useMemo(searchResultOptions, [| searchResults |])
+
+    React.fragment [
+        Html.input [
+            prop.className "input"
+            prop.placeholder "Type a repository's name"
+            prop.style [ style.marginBottom 10 ]
+            prop.ref inputRef
+            prop.onKeyUp(key.enter, fun ev -> 
+                setSelectedRepo None
+                search inputRef.current.Value.value
+            )
+        ]
+
+        SelectSearch.selectSearch [
+            selectSearch.placeholder (
+                if Deferred.inProgress searchResults 
+                then "Loading" 
+                elif List.isEmpty options
+                then "Search results"
+                else "Pick a repository from search results"
+            )
+            selectSearch.search true
+            selectSearch.onChange (fun repo -> setSelectedRepo(Some repo))
+            selectSearch.value (defaultArg selectedRepo "")
+            selectSearch.options options
+            if not (List.isEmpty options) && selectedRepo.IsNone then
+                selectSearch.printOptions.always
+        ]
+
+        match selectedRepo with 
+        | Some repo -> 
+            Html.div [ prop.style [ style.marginBottom 5 ] ]
+            GithubReleases(repo)
+
+        | None -> 
+            Html.none
+    ]
+
+[<ReactComponent>]
 let View() =     
     let (currentUrl, setCurrentUrl) = React.useState(Router.currentUrl())
     Html.div [
@@ -331,6 +423,9 @@ let View() =
                         prop.children [
                             Html.h2 "Local resource plugins"
                             LocalPlugins()
+                            Html.br [ ]
+                            Html.h2 "Search Github"
+                            SearchGithub()
                         ]
                     ]
 

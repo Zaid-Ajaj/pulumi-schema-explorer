@@ -1,5 +1,6 @@
 module Server
 
+open System
 open Fable.Remoting.Server
 open Fable.Remoting.Giraffe
 open Saturn
@@ -8,24 +9,43 @@ open CliWrap.Buffered
 open Newtonsoft.Json.Linq
 open Shared
 open System.Threading.Tasks
+open Octokit
 
-module Storage =
-    let todos = ResizeArray()
+let github = new GitHubClient(ProductHeaderValue "PulumiBot")
 
-    let addTodo (todo: Todo) =
-        if Todo.isValid todo.Description then
-            todos.Add todo
-            Ok()
-        else
-            Error "Invalid todo"
+let rec searchGithub (term: string) = 
+    task {
+        try 
+            let request = SearchRepositoriesRequest term
+            let! searchResults = github.Search.SearchRepo(request)
+            let bestResults = 
+                searchResults.Items
+                |> Seq.map (fun repo -> repo.FullName)
 
-    do
-        addTodo (Todo.create "Create new SAFE project")
-        |> ignore
+            return List.ofSeq bestResults
+        with 
+            | :? RateLimitExceededException as error -> 
+                do! Task.Delay 5000
+                return! searchGithub term
+    }
 
-        addTodo (Todo.create "Write your app") |> ignore
-        addTodo (Todo.create "Ship it !!!") |> ignore
+let version (release: Release) = 
+    if not (String.IsNullOrWhiteSpace(release.Name)) then
+        Some (release.Name.Substring(1, release.Name.Length - 1))
+    elif not (String.IsNullOrWhiteSpace(release.TagName)) then 
+        Some (release.TagName.Substring(1, release.TagName.Length - 1))
+    else 
+        None
 
+let findGithubReleases (repo: string) = 
+    task {
+        match repo.Split "/" with 
+        | [| owner; repoName |] -> 
+            let! releases = github.Repository.Release.GetAll(owner, repoName)
+            return List.choose id [ for release in releases -> version release ]
+        | _ -> 
+            return []
+    }
 
 let getLocalPlugins() : Task<PluginReference list> =
     task {
@@ -50,18 +70,14 @@ let getSchemaByPlugin(plugin: PluginReference) =
         return PulumiSchema.SchemaLoader.FromPulumi(plugin.Name, plugin.Version)
     }
 
-let todosApi =
-    { getTodos = fun () -> async { return Storage.todos |> List.ofSeq }
-      getLocalPlugins = getLocalPlugins >> Async.AwaitTask
-      getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
-      addTodo =
-        fun todo ->
-            async {
-                return
-                    match Storage.addTodo todo with
-                    | Ok () -> todo
-                    | Error e -> failwith e
-            } }
+let schemaExplorerApi = { 
+    getLocalPlugins = getLocalPlugins >> Async.AwaitTask
+    getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
+    searchGithub = searchGithub >> Async.AwaitTask
+    findGithubReleases = findGithubReleases >> Async.AwaitTask
+}
+
+let pulumiSchemaDocs = Remoting.documentation "Pulumi Schema Explorer" [ ]
 
 let webApp =
     Remoting.createApi ()
@@ -70,8 +86,10 @@ let webApp =
         printfn "%A" error
         Ignore
     )
-    |> Remoting.fromValue todosApi
+    |> Remoting.fromValue schemaExplorerApi
+    |> Remoting.withDocs "/api/docs" pulumiSchemaDocs
     |> Remoting.buildHttpHandler
+
 
 let app =
     application {
