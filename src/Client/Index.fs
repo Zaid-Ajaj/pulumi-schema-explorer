@@ -367,7 +367,8 @@ let SearchGithub() =
             prop.ref inputRef
             prop.onKeyUp(key.enter, fun ev -> 
                 setSelectedRepo None
-                search inputRef.current.Value.value
+                inputRef.current
+                |> Option.iter (fun element -> search element.value)
             )
         ]
 
@@ -397,7 +398,7 @@ let SearchGithub() =
     ]
 
 [<ReactComponent>]
-let View() =     
+let View() =
     let (currentUrl, setCurrentUrl) = React.useState(Router.currentUrl())
     Html.div [
         prop.style [ style.margin 20 ]
