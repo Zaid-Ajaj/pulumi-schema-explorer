@@ -76,8 +76,7 @@ let getReleaseNotes (req: GetReleaseNotesRequest) =
         let! releases = github.Repository.Release.GetAll(repository.Id)
         return
             releases
-            |> Seq.filter (fun release -> version release = Some req.Version)
-            |> Seq.tryHead
+            |> Seq.tryFind (fun release -> version release = Some req.Version)
             |> Option.map (fun release -> release.Body)
             |> Option.defaultValue ""
     }
@@ -103,14 +102,12 @@ let webApp =
     |> Remoting.withDocs "/api/docs" pulumiSchemaDocs
     |> Remoting.buildHttpHandler
 
-
-let app =
-    application {
-        use_router webApp
-        memory_cache
-        use_static "public"
-        use_gzip
-    }
+let app = application {
+    use_router webApp
+    memory_cache
+    use_static "public"
+    use_gzip
+}
 
 [<EntryPoint>]
 let main _ =
