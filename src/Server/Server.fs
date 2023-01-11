@@ -70,11 +70,24 @@ let getSchemaByPlugin(plugin: PluginReference) =
         return PulumiSchema.SchemaLoader.FromPulumi(plugin.Name, plugin.Version)
     }
 
+let getReleaseNotes (req: GetReleaseNotesRequest) = 
+    task {
+        let! repository = github.Repository.Get(req.Owner, req.Repository)
+        let! releases = github.Repository.Release.GetAll(repository.Id)
+        return
+            releases
+            |> Seq.filter (fun release -> version release = Some req.Version)
+            |> Seq.tryHead
+            |> Option.map (fun release -> release.Body)
+            |> Option.defaultValue ""
+    }
+
 let schemaExplorerApi = { 
     getLocalPlugins = getLocalPlugins >> Async.AwaitTask
     getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
     searchGithub = searchGithub >> Async.AwaitTask
     findGithubReleases = findGithubReleases >> Async.AwaitTask
+    getReleaseNotes = getReleaseNotes >> Async.AwaitTask
 }
 
 let pulumiSchemaDocs = Remoting.documentation "Pulumi Schema Explorer" [ ]

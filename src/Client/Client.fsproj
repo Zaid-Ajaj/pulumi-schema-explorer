@@ -14,6 +14,7 @@
     </ItemGroup>
     <ItemGroup>
       <PackageReference Include="Fable.Remoting.Client" Version="7.25.0" />
+      <PackageReference Include="Feliz.Markdown" Version="2.3.0" />
       <PackageReference Include="Feliz.UseDeferred" Version="2.0.0" />
       <PackageReference Include="Feliz.Router" Version="4.0.0" />
       <PackageReference Include="Feliz" Version="2.3.0" />

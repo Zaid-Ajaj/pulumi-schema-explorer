@@ -4,6 +4,7 @@ open Feliz
 open Feliz.UseDeferred
 open Feliz.Router
 open Feliz.SelectSearch
+open Feliz.Markdown
 
 open Shared
 open PulumiSchema.Types
@@ -241,6 +242,36 @@ let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
     ]
 
 [<ReactComponent>]
+let ReleaseNotes(repository: string, version: string) = 
+    let inline getReleaseNotes() = async {
+        let fullRepoName = repository.Replace("https://", "").Replace("http://", "").Replace("github.com/", "")
+        match fullRepoName.Split "/" with
+        | [| owner; repo |] -> 
+            let request = { Owner = owner; Repository = repo; Version = version }
+            return! schemaExplorerApi.getReleaseNotes request
+        | _ -> 
+            return ""
+    }
+
+    let releaseNotes = React.useDeferred(getReleaseNotes(), [| repository; version |])
+    match releaseNotes with
+    | Deferred.HasNotStartedYet -> Html.none
+    | Deferred.InProgress -> Html.p "Loading release notes"
+    | Deferred.Failed ex -> 
+        Html.p [ 
+            prop.style [ style.color "red" ]
+            prop.text (ex.Message)
+        ]
+
+    | Deferred.Resolved releaseNotesBody -> 
+        Html.div [
+            prop.className "content"
+            prop.children [
+                Markdown.markdown releaseNotesBody
+            ]
+        ]
+
+[<ReactComponent>]
 let PluginSchemaExplorer(name: string, version: string, tab: string) = 
     let schema = React.useDeferred(schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, [| name; version |])
     let selectedTab, setSelectedTab = React.useState(tab)
@@ -294,6 +325,20 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
                                 ]
                             ]
                         ]
+
+                        match schema.repository with 
+                        | Some repo -> 
+                            Html.li [
+                                prop.className [ if selectedTab = "release-notes" then "is-active" else "" ]
+                                prop.children [
+                                    Html.a [
+                                        prop.onClick (fun _ -> setSelectedTab "release-notes")
+                                        prop.text "Release Notes"
+                                    ]
+                                ]
+                            ]
+
+                        | None -> Html.none
                     ]
                 ]
             ]
@@ -302,6 +347,7 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
             | "general" -> GeneralSchemaInfo(name, version, schema)
             | "resources" -> SchemaResources(name, version, schema)
             | "functions" -> SchemaFunctions(name, version, schema)
+            | "release-notes" -> ReleaseNotes(defaultArg schema.repository "", version)
             | otherwise -> Html.p $"Unknown tab: {otherwise}"
         ]
 
