@@ -14,10 +14,17 @@ type GetReleaseNotesRequest = {
     Version: string 
 }
 
+type InstallThirdPartyPluginRequest = {
+    Owner: string
+    PluginName: string
+    Version: string
+}
+
 type ISchemaExplorerApi = { 
     getLocalPlugins : unit -> Async<PluginReference list>
     getSchemaByPlugin: PluginReference -> Async<Result<Schema, string>> 
     searchGithub: string -> Async<string list>
     findGithubReleases : string -> Async<string list> 
     getReleaseNotes : GetReleaseNotesRequest -> Async<string>
+    installThirdPartyPlugin : InstallThirdPartyPluginRequest -> Async<Result<unit, string>>
 }

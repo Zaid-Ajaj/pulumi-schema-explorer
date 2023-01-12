@@ -380,7 +380,17 @@ let GithubReleases(repo: string) =
         )
         selectSearch.onChange (fun version -> 
             setSelectedRelease(Some version)
-            Router.navigate(repo.Replace("pulumi/pulumi-", ""), version)
+            match repo.Split "/" with
+            | [| "pulumi"; repoName |] when repoName.StartsWith "pulumi-" ->
+                let firstPartyPulumiPlugin = repoName.Replace("pulumi-", "")
+                Router.navigate(firstPartyPulumiPlugin, version)
+
+            | [| owner; repoName |] when repoName.StartsWith "pulumi-" -> 
+                let thirdPartyPulumiPlugin = repoName.Replace("pulumi-", "")
+                Router.navigate("third-party-plugin", owner, thirdPartyPulumiPlugin, version)
+
+            | otherwise -> 
+                Router.navigate("unknown-pulumi-plugin")
         )
         selectSearch.value (defaultArg selectedRelease "")
         selectSearch.options options
@@ -444,6 +454,59 @@ let SearchGithub() =
     ]
 
 [<ReactComponent>]
+let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) = 
+    let inline requestInput() = {
+        Owner = owner
+        PluginName = plugin
+        Version = version
+    }
+
+    let installation = React.useDeferred(schemaExplorerApi.installThirdPartyPlugin(requestInput()), [| owner; plugin; version |])
+    
+    let inline redirectWhenInstalled() = 
+        match installation with 
+        | Deferred.Resolved (Ok ()) -> 
+            Router.navigate(plugin, version)
+        | _ -> 
+            ignore()
+    
+    React.useEffect(redirectWhenInstalled, [| box installation |])
+
+    match installation with
+    | Deferred.HasNotStartedYet -> Html.none 
+    | Deferred.InProgress -> 
+        Html.div [
+            prop.className "block"
+            prop.children [
+                Html.p [
+                    prop.style [ style.marginBottom 5 ]
+                    prop.text $"Installing third-party plugin {plugin} v{version}..."
+                ]
+
+                Html.progress [
+                    prop.className "progress is-small is-primary"
+                    prop.max 100
+                ]
+            ]
+        ]
+
+    | Deferred.Failed error -> 
+        Html.p [
+            prop.style [ style.color.red ]
+            prop.text error.Message
+        ]
+
+    | Deferred.Resolved (Error errorMessage) -> 
+        Html.p [
+            prop.style [ style.color.darkOrchid ]
+            prop.text errorMessage
+        ]
+
+    | Deferred.Resolved (Ok ()) -> 
+        Html.none
+
+
+[<ReactComponent>]
 let View() =
     let (currentUrl, setCurrentUrl) = React.useState(Router.currentUrl())
     Html.div [
@@ -487,8 +550,14 @@ let View() =
                                 router.onUrlChanged setCurrentUrl
                                 router.children [
                                     match currentUrl with
-                                    | [ name; version ] -> PluginSchemaExplorer(name, version, "general")
-                                    | _ -> Html.p "Select a plugin to explore"
+                                    | [ "unknown-pulumi-plugin" ] -> 
+                                        Html.p "Selected repository is not a Pulumi plugin"
+                                    | [ "third-party-plugin"; owner; name; version ] -> 
+                                        InstallThirdPartyPlugin(owner, name, version)
+                                    | [ name; version ] -> 
+                                        PluginSchemaExplorer(name, version, "general")
+                                    | _ -> 
+                                        Html.p "Select a plugin to explore"
                                 ]
                             ]
                         ]

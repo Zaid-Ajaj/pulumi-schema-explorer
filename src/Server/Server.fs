@@ -81,12 +81,27 @@ let getReleaseNotes (req: GetReleaseNotesRequest) =
             |> Option.defaultValue ""
     }
 
+let installThirdPartyPlugin (req: InstallThirdPartyPluginRequest) = 
+    task {
+        let! command = 
+            Cli.Wrap("pulumi")
+               .WithArguments($"plugin install resource {req.PluginName} {req.Version} --server github://api.github.com/{req.Owner}")
+               .WithValidation(CommandResultValidation.None)
+               .ExecuteBufferedAsync()
+
+        if command.ExitCode = 0 then
+            return Ok()
+        else    
+            return Error(command.StandardError)
+    }
+
 let schemaExplorerApi = { 
     getLocalPlugins = getLocalPlugins >> Async.AwaitTask
     getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
     searchGithub = searchGithub >> Async.AwaitTask
     findGithubReleases = findGithubReleases >> Async.AwaitTask
     getReleaseNotes = getReleaseNotes >> Async.AwaitTask
+    installThirdPartyPlugin = installThirdPartyPlugin >> Async.AwaitTask
 }
 
 let pulumiSchemaDocs = Remoting.documentation "Pulumi Schema Explorer" [ ]
