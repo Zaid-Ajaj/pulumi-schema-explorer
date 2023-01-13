@@ -66,6 +66,40 @@ let private findModules(schema: Schema) =
     allModules
     |> List.distinct
 
+[<ReactComponent>]
+let Row(cells: ReactElement list) = 
+    Html.tr [ for cell in cells -> Html.td cell ]
+
+[<ReactComponent>]
+let Table (rows: ReactElement list) = 
+    Html.table [
+        prop.className "table"
+        prop.children [
+            Html.tbody [
+                prop.children rows
+            ]
+        ]
+    ]
+
+[<ReactComponent>]
+let Subtitle(text: string) = 
+    Html.p [ 
+        prop.className "subtitle"
+        prop.text text 
+    ]
+
+[<ReactComponent>]
+let Div(className: string, children: ReactElement list) = 
+    Html.div [
+        prop.className className
+        prop.children children
+    ]
+
+[<ReactComponent>]
+let MarkdownContent(sourceMarkdown: string) =  
+    Div("content", [
+        Markdown.markdown sourceMarkdown
+    ])
 
 [<ReactComponent>]
 let SchemaResources(name: string, version: string, schema: Schema) = 
@@ -132,6 +166,19 @@ let SchemaResources(name: string, version: string, schema: Schema) =
         ]
         
         Html.br [ ]
+
+        match selectedResource with
+        | None -> Html.none
+        | Some resource -> 
+            let description = 
+                match resource.description with
+                | Some description -> 
+                    match description.IndexOf("{{% examples %}}") with 
+                    | -1 -> description
+                    | index -> description.Substring(0, index)
+                | None -> ""
+
+            MarkdownContent description
     ]
 
 [<ReactComponent>]
@@ -347,7 +394,11 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
             | "general" -> GeneralSchemaInfo(name, version, schema)
             | "resources" -> SchemaResources(name, version, schema)
             | "functions" -> SchemaFunctions(name, version, schema)
-            | "release-notes" -> ReleaseNotes(defaultArg schema.repository "", version)
+            | "release-notes" -> 
+                match schema.repository with
+                | Some repoUrl -> ReleaseNotes(repoUrl, version)
+                | None -> Html.none
+
             | otherwise -> Html.p $"Unknown tab: {otherwise}"
         ]
 
