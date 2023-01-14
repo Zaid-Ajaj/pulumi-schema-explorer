@@ -10,6 +10,8 @@ open Shared
 open PulumiSchema.Types
 open System
 open Fable.Remoting.Client
+open Fable.Core
+open Fable.Core.JsInterop
 
 let schemaExplorerApi =
     Remoting.createApi ()
@@ -95,10 +97,32 @@ let Div(className: string, children: ReactElement list) =
         prop.children children
     ]
 
+[<ReactComponent(import="default", from="react-highlight")>]
+let Hightlight(className: string, children: ReactElement array) : ReactElement = jsNative
+
+let inline preComponent (render: obj -> ReactElement) = unbox<IComponent> (Interop.mkAttr "pre" render)
+
 [<ReactComponent>]
-let MarkdownContent(sourceMarkdown: string) =  
+let MarkdownContent(sourceMarkdown: string) = 
     Div("content", [
-        Markdown.markdown sourceMarkdown
+        Markdown.markdown [
+            markdown.children sourceMarkdown
+            markdown.components [
+                preComponent (fun props -> 
+                    let children = emitJsExpr<ReactElement array> props "$0.children"
+                    React.fragment children
+                )
+
+                markdown.components.code (fun props -> 
+                    let isInlineCode = emitJsExpr<bool> props "$0.inline || false"
+                    let children = emitJsExpr<ReactElement array> props "$0.children"
+                    let className = emitJsExpr<string> props "$0.className"
+                    if isInlineCode then
+                        Html.code children
+                    else
+                        Hightlight(className, children))
+            ]
+        ]
     ])
 
 [<ReactComponent>]
@@ -170,15 +194,9 @@ let SchemaResources(name: string, version: string, schema: Schema) =
         match selectedResource with
         | None -> Html.none
         | Some resource -> 
-            let description = 
-                match resource.description with
-                | Some description -> 
-                    match description.IndexOf("{{% examples %}}") with 
-                    | -1 -> description
-                    | index -> description.Substring(0, index)
-                | None -> ""
-
-            MarkdownContent description
+            let description = resource.description |> Option.defaultValue ""
+            let docs = Examples.parseDocumentation description
+            MarkdownContent docs.description
     ]
 
 [<ReactComponent>]
