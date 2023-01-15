@@ -70,7 +70,13 @@ let private findModules(schema: Schema) =
 
 [<ReactComponent>]
 let Row(cells: ReactElement list) = 
-    Html.tr [ for cell in cells -> Html.td cell ]
+    Html.tr [ 
+        for (i, cell) in List.indexed cells do
+        Html.td [ 
+            prop.key i
+            prop.children cell 
+        ] 
+    ]
 
 [<ReactComponent>]
 let Table (rows: ReactElement list) = 
@@ -100,30 +106,215 @@ let Div(className: string, children: ReactElement list) =
 [<ReactComponent(import="default", from="react-highlight")>]
 let Hightlight(className: string, children: ReactElement array) : ReactElement = jsNative
 
-let inline preComponent (render: obj -> ReactElement) = unbox<IComponent> (Interop.mkAttr "pre" render)
-
 [<ReactComponent>]
 let MarkdownContent(sourceMarkdown: string) = 
     Div("content", [
         Markdown.markdown [
             markdown.children sourceMarkdown
             markdown.components [
-                preComponent (fun props -> 
-                    let children = emitJsExpr<ReactElement array> props "$0.children"
-                    React.fragment children
-                )
-
+                markdown.components.pre (fun props -> React.fragment props.children)
                 markdown.components.code (fun props -> 
-                    let isInlineCode = emitJsExpr<bool> props "$0.inline || false"
-                    let children = emitJsExpr<ReactElement array> props "$0.children"
-                    let className = emitJsExpr<string> props "$0.className"
-                    if isInlineCode then
-                        Html.code children
+                    if props.isInline then
+                        Html.code props.children
                     else
-                        Hightlight(className, children))
+                        Hightlight(props.className, props.children))
             ]
         ]
     ])
+
+[<ReactComponent>]
+let ExamplesDropdown(docs: Examples.Documentation) = 
+    let selectedExample, setSelectedExample = React.useState<string option>(None)
+    let inline resetSelection() = setSelectedExample(None)
+    React.useEffect(resetSelection, [| box docs |])
+
+    let inline cleanExampleDocs(example: string) = example.Replace("#", "")
+    let inline exampleTitle (example: Examples.Example) = 
+        if String.IsNullOrWhiteSpace example.description then 
+            $"Basic usage in {example.language}"
+        else
+        match List.ofArray(example.description.Trim().Split '\n') with
+        | title :: rest -> 
+            Browser.Dom.console.log(title, rest)
+            $"{cleanExampleDocs(title)} in {example.language}"
+        | [] ->
+            $"Basic usage in {example.language}"
+
+    Html.div [
+        SelectSearch.selectSearch [
+            selectSearch.id "examples"
+            selectSearch.placeholder "Select an example"
+            selectSearch.search true
+            selectSearch.value (defaultArg selectedExample "")
+            selectSearch.onChange (fun (selectedExample: string) -> setSelectedExample(Some selectedExample))
+            selectSearch.options [
+                for example in docs.examples -> {
+                    value = example.description + example.language
+                    name = exampleTitle example
+                    disabled = false
+                }
+            ]
+        ]
+
+        match selectedExample with 
+        | None -> Html.none
+        | Some exampleRef -> 
+            let example = docs.examples |> List.tryFind (fun e -> e.description + e.language = exampleRef)
+            match example with
+            | None -> Html.none
+            | Some example -> 
+                Html.br [ ]
+                MarkdownContent $"```{example.language}{example.code}```"
+    ]
+
+let rec private renderType(schemaType) : string = 
+    match schemaType with
+    | SchemaType.String -> "string"
+    | SchemaType.Number -> "number"
+    | SchemaType.Boolean -> "boolean"
+    | SchemaType.Integer -> "integer"
+    | SchemaType.Array elementType ->
+        let renderedElementType = renderType elementType 
+        $"array<{renderedElementType}>"
+    | SchemaType.Ref reference -> $"Ref: {reference}"
+    | SchemaType.Output elementType -> renderType elementType
+    | SchemaType.Map elementType -> 
+        let renderedElementType = renderType elementType 
+        $"map<string, {renderedElementType}>"
+    | anythingElse -> "<empty>"
+
+[<ReactComponent>]
+let RenderProperties(properties: Map<string, Property>) = 
+    Table [
+        for (name, property) in Map.toList properties do
+            Row [
+                Html.div [ 
+                    Html.strong name
+                    Html.br [ ]
+                    Html.text (renderType(property.schemaType))
+                ]
+                MarkdownContent (defaultArg property.description "")
+            ]
+    ]
+
+[<ReactComponent>]
+let ResourceInfo(resource: Resource) = 
+    let selectedTab, setSelectedTab = React.useState "docs"
+    let docs = Examples.parseDocumentation (defaultArg resource.description "")
+    React.fragment [
+        Div("tabs", [
+            Html.ul [
+                Html.li [
+                    prop.className (if selectedTab = "docs" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "docs")
+                            prop.text "Docs"
+                        ]
+                    ]
+                ]
+                Html.li [
+                    prop.className (if selectedTab = "inputs" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "inputs")
+                            prop.text "Inputs"
+                        ]
+                    ]
+                ]
+                Html.li [
+                    prop.className (if selectedTab = "outputs" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "outputs")
+                            prop.text "Outputs"
+                        ]
+                    ]
+                ]
+                Html.li [
+                    prop.className (if selectedTab = "examples" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "examples")
+                            prop.text "Examples"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        match selectedTab with
+        | "docs" -> MarkdownContent docs.description
+        | "inputs" -> RenderProperties(resource.inputProperties)
+        | "outputs" -> RenderProperties(resource.properties)
+        | "examples" -> ExamplesDropdown docs
+        | _ -> Html.p [ prop.text $"Unknown tab: {selectedTab}" ]
+    ]
+
+[<ReactComponent>]
+let FunctionInfo(functionDefinition: Function) = 
+    let selectedTab, setSelectedTab = React.useState "docs"
+    let docs = Examples.parseDocumentation (defaultArg functionDefinition.description "")
+    React.fragment [
+        Div("tabs", [
+            Html.ul [
+                Html.li [
+                    prop.className (if selectedTab = "docs" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "docs")
+                            prop.text "Docs"
+                        ]
+                    ]
+                ]
+                Html.li [
+                    prop.className (if selectedTab = "inputs" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "inputs")
+                            prop.text "Inputs"
+                        ]
+                    ]
+                ]
+                Html.li [
+                    prop.className (if selectedTab = "outputs" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "outputs")
+                            prop.text "Outputs"
+                        ]
+                    ]
+                ]
+                Html.li [
+                    prop.className (if selectedTab = "examples" then "is-active" else "")
+                    prop.children [
+                        Html.a [
+                            prop.onClick (fun _ -> setSelectedTab "examples")
+                            prop.text "Examples"
+                        ]
+                    ]
+                ]
+            ]
+        ])
+
+        match selectedTab with
+        | "docs" -> MarkdownContent docs.description
+        | "inputs" ->  
+            match functionDefinition.inputs with
+            | None -> Html.none
+            | Some inputs ->
+                MarkdownContent (defaultArg inputs.description "")
+                RenderProperties(inputs.properties)
+        | "outputs" -> 
+            match functionDefinition.returnType with 
+            | SchemaType.Object properties -> RenderProperties properties
+            | _ -> Html.text (renderType functionDefinition.returnType)
+        | "examples" ->
+            ExamplesDropdown docs
+        | _ -> 
+            Html.p [ prop.text $"Unknown tab: {selectedTab}" ]
+    ]
+
 
 [<ReactComponent>]
 let SchemaResources(name: string, version: string, schema: Schema) = 
@@ -193,10 +384,7 @@ let SchemaResources(name: string, version: string, schema: Schema) =
 
         match selectedResource with
         | None -> Html.none
-        | Some resource -> 
-            let description = resource.description |> Option.defaultValue ""
-            let docs = Examples.parseDocumentation description
-            MarkdownContent docs.description
+        | Some resource -> ResourceInfo(resource)
     ]
 
 [<ReactComponent>]
@@ -267,8 +455,12 @@ let SchemaFunctions(name: string, version: string, schema: Schema) =
                 selectSearch.options functions
                 selectSearch.search true
             ]
-            
+
             Html.br [ ]
+
+            match selectedFunction with 
+            | None -> Html.none
+            | Some functionDefinition -> FunctionInfo(functionDefinition)
     ]
 
 let inline capitalize(input: string) = 
