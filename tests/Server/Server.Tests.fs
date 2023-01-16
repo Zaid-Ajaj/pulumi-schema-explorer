@@ -5,9 +5,7 @@ open Expecto
 open Shared
 open Server
 
-let server = testList "Server" [
-
-]
+let server = testList "Server" [ ]
 
 let all =
     testList "All"

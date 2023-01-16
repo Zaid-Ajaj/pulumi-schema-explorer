@@ -964,7 +964,7 @@ let PluginSchemaDiff(name, versionA, versionB) =
                                 prop.className "fas fa-exchange-alt"; 
                                 prop.style [ style.marginRight 10 ]
                             ]
-                        
+
                             Html.span [ 
                                 prop.style [ style.fontSize 18; style.marginRight 10 ]
                                 prop.text (memberName changedResource.Resource.token)
