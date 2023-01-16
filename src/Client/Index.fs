@@ -20,15 +20,15 @@ let schemaExplorerApi =
 
 
 [<ReactComponent>]
-let LocalPlugins() = 
+let LocalPlugins() =
     let plugins = React.useDeferred(schemaExplorerApi.getLocalPlugins(), [| |])
     let selectedPlugin, setSelectedPlugin = React.useState<string option>(None)
     React.fragment [
         match plugins with
         | Deferred.HasNotStartedYet -> Html.none
         | Deferred.InProgress -> Html.p "Loading plugins..."
-        | Deferred.Failed ex -> 
-            Html.p [ 
+        | Deferred.Failed ex ->
+            Html.p [
                 prop.style [ style.color "red" ]
                 prop.text ex.Message
             ]
@@ -39,9 +39,9 @@ let LocalPlugins() =
                 selectSearch.placeholder "Select a local plugin"
                 selectSearch.search true
                 selectSearch.value (defaultArg selectedPlugin "")
-                selectSearch.onChange (fun (selectedPlugin: string) -> 
-                    match selectedPlugin.Split "@" with 
-                    | [| name; version |] -> 
+                selectSearch.onChange (fun (selectedPlugin: string) ->
+                    match selectedPlugin.Split "@" with
+                    | [| name; version |] ->
                         setSelectedPlugin(Some selectedPlugin)
                         Router.navigate(name, version)
                     | _ -> ignore()
@@ -56,30 +56,30 @@ let LocalPlugins() =
             ]
     ]
 
-let inline moduleName (token: string) = token.Split ':' |> Array.skip 1 |> Array.head 
+let inline moduleName (token: string) = token.Split ':' |> Array.skip 1 |> Array.head
 let inline memberName (token: string) = Array.last(token.Split(':'))
 
-let private findModules(schema: Schema) = 
+let private findModules(schema: Schema) =
     let allModules = [
         for resource in schema.resources.Values -> moduleName resource.token
         for func in schema.functions.Values -> moduleName func.token
-    ] 
+    ]
 
     allModules
     |> List.distinct
 
 [<ReactComponent>]
-let Row(cells: ReactElement list) = 
-    Html.tr [ 
+let Row(cells: ReactElement list) =
+    Html.tr [
         for (i, cell) in List.indexed cells do
-        Html.td [ 
+        Html.td [
             prop.key i
-            prop.children cell 
-        ] 
+            prop.children cell
+        ]
     ]
 
 [<ReactComponent>]
-let Table (rows: ReactElement list) = 
+let Table (rows: ReactElement list) =
     Html.table [
         prop.className "table"
         prop.children [
@@ -90,57 +90,48 @@ let Table (rows: ReactElement list) =
     ]
 
 [<ReactComponent>]
-let Subtitle(text: string) = 
-    Html.p [ 
+let Subtitle(text: string) =
+    Html.p [
         prop.className "subtitle"
-        prop.text text 
+        prop.text text
     ]
 
 [<ReactComponent>]
-let Div(className: string, children: ReactElement list) = 
+let Div(className: string, children: ReactElement list) =
     Html.div [
         prop.className className
         prop.children children
     ]
 
 [<ReactComponent(import="default", from="react-highlight")>]
-let Hightlight(className: string, children: ReactElement array) : ReactElement = jsNative
+let Highlight(className: string, children: ReactElement array) : ReactElement = jsNative
 
 [<ReactComponent>]
-let MarkdownContent(sourceMarkdown: string) = 
+let MarkdownContent(sourceMarkdown: string) =
     Div("content", [
         Markdown.markdown [
             markdown.children sourceMarkdown
             markdown.components [
                 markdown.components.pre (fun props -> React.fragment props.children)
-                markdown.components.code (fun props -> 
-                    if props.isInline then
-                        Html.code props.children
-                    else
-                        Hightlight(props.className, props.children))
+                markdown.components.code (fun props ->
+                    if props.isInline
+                    then Html.code props.children
+                    else Highlight(props.className, props.children)
+                )
             ]
         ]
     ])
 
 [<ReactComponent>]
-let ExamplesDropdown(docs: Examples.Documentation) = 
+let ExamplesDropdown(docs: Examples.Documentation) =
     let selectedExample, setSelectedExample = React.useState<string option>(None)
     let inline resetSelection() = setSelectedExample(None)
     React.useEffect(resetSelection, [| box docs |])
 
-    let inline cleanExampleDocs(example: string) = example.Replace("#", "")
-    let inline exampleTitle (example: Examples.Example) = 
-        if String.IsNullOrWhiteSpace example.description then 
-            $"Basic usage in {example.language}"
-        else
-        match List.ofArray(example.description.Trim().Split '\n') with
-        | title :: rest -> 
-            Browser.Dom.console.log(title, rest)
-            $"{cleanExampleDocs(title)} in {example.language}"
-        | [] ->
-            $"Basic usage in {example.language}"
-
-    Html.div [
+    if docs.examples.Length = 0 then
+        Html.p "No examples found"
+    else
+    React.fragment [
         SelectSearch.selectSearch [
             selectSearch.id "examples"
             selectSearch.placeholder "Select an example"
@@ -149,183 +140,144 @@ let ExamplesDropdown(docs: Examples.Documentation) =
             selectSearch.onChange (fun (selectedExample: string) -> setSelectedExample(Some selectedExample))
             selectSearch.options [
                 for example in docs.examples -> {
-                    value = example.description + example.language
-                    name = exampleTitle example
+                    value = example.Id()
+                    name = example.title
                     disabled = false
                 }
             ]
         ]
 
-        match selectedExample with 
+        match selectedExample with
         | None -> Html.none
-        | Some exampleRef -> 
-            let example = docs.examples |> List.tryFind (fun e -> e.description + e.language = exampleRef)
+        | Some exampleId ->
+            let example = docs.examples |> List.tryFind (fun e -> e.Id() = exampleId)
             match example with
             | None -> Html.none
-            | Some example -> 
+            | Some example ->
                 Html.br [ ]
-                MarkdownContent $"```{example.language}{example.code}```"
+                match example.description with
+                | "" -> MarkdownContent $"```{example.language}{example.code}```"
+                | description ->
+                    MarkdownContent description
+                    Html.br [ ]
+                    MarkdownContent $"```{example.language}{example.code}```"
     ]
 
-let rec private renderType(schemaType) : string = 
+[<ReactComponent>]
+let rec RenderType(schemaType) : ReactElement =
     match schemaType with
-    | SchemaType.String -> "string"
-    | SchemaType.Number -> "number"
-    | SchemaType.Boolean -> "boolean"
-    | SchemaType.Integer -> "integer"
+    | SchemaType.String -> Html.text "string"
+    | SchemaType.Number -> Html.text "number"
+    | SchemaType.Boolean -> Html.text "boolean"
+    | SchemaType.Integer -> Html.text "integer"
+    | SchemaType.Archive -> Html.text "archive"
+    | SchemaType.Asset -> Html.text "asset"
+    | SchemaType.Any -> Html.text "any"
+    | SchemaType.Json -> Html.text "json"
     | SchemaType.Array elementType ->
-        let renderedElementType = renderType elementType 
-        $"array<{renderedElementType}>"
-    | SchemaType.Ref reference -> $"Ref: {reference}"
-    | SchemaType.Output elementType -> renderType elementType
-    | SchemaType.Map elementType -> 
-        let renderedElementType = renderType elementType 
-        $"map<string, {renderedElementType}>"
-    | anythingElse -> "<empty>"
+        let renderedElementType = RenderType elementType
+        Html.span [ Html.text "array<"; renderedElementType; Html.text">" ]
+
+    | SchemaType.Ref reference -> Html.text $"Ref: {reference}"
+    | SchemaType.Output elementType -> RenderType elementType
+    | SchemaType.Map elementType ->
+        let renderedElementType = RenderType elementType
+        Html.span [ Html.text "map<string, "; renderedElementType; Html.text">" ]
+
+    | anythingElse -> Html.text "<empty>"
 
 [<ReactComponent>]
-let RenderProperties(properties: Map<string, Property>) = 
+let RenderProperties(properties: Map<string, Property>) =
     Table [
         for (name, property) in Map.toList properties do
             Row [
-                Html.div [ 
+                Html.div [
                     Html.strong name
                     Html.br [ ]
-                    Html.text (renderType(property.schemaType))
+                    RenderType property.schemaType
                 ]
                 MarkdownContent (defaultArg property.description "")
             ]
     ]
 
 [<ReactComponent>]
-let ResourceInfo(resource: Resource) = 
+let Tab(title: string, value: string, selectedTab, onClick: string -> unit) =
+    Html.li [
+        prop.className (if selectedTab = value then "is-active" else "")
+        prop.children [
+            Html.a [
+                prop.onClick (fun _ -> onClick value)
+                prop.text title
+            ]
+        ]
+    ]
+
+let Tabs(children: ReactElement list) =
+    Div("tabs", [
+        Html.ul children
+    ])
+
+[<ReactComponent>]
+let ResourceInfo(resource: Resource) =
     let selectedTab, setSelectedTab = React.useState "docs"
     let docs = Examples.parseDocumentation (defaultArg resource.description "")
     React.fragment [
-        Div("tabs", [
-            Html.ul [
-                Html.li [
-                    prop.className (if selectedTab = "docs" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "docs")
-                            prop.text "Docs"
-                        ]
-                    ]
-                ]
-                Html.li [
-                    prop.className (if selectedTab = "inputs" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "inputs")
-                            prop.text "Inputs"
-                        ]
-                    ]
-                ]
-                Html.li [
-                    prop.className (if selectedTab = "outputs" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "outputs")
-                            prop.text "Outputs"
-                        ]
-                    ]
-                ]
-                Html.li [
-                    prop.className (if selectedTab = "examples" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "examples")
-                            prop.text "Examples"
-                        ]
-                    ]
-                ]
-            ]
-        ])
+        Tabs [
+            Tab("Docs", "docs", selectedTab, setSelectedTab)
+            Tab("Inputs", "inputs", selectedTab, setSelectedTab)
+            Tab("Outputs", "outputs", selectedTab, setSelectedTab)
+            Tab("Examples", "examples", selectedTab, setSelectedTab)
+        ]
 
         match selectedTab with
         | "docs" -> MarkdownContent docs.description
-        | "inputs" -> RenderProperties(resource.inputProperties)
-        | "outputs" -> RenderProperties(resource.properties)
+        | "inputs" -> RenderProperties resource.inputProperties
+        | "outputs" -> RenderProperties resource.properties
         | "examples" -> ExamplesDropdown docs
-        | _ -> Html.p [ prop.text $"Unknown tab: {selectedTab}" ]
+        | _ -> Html.none
     ]
 
 [<ReactComponent>]
-let FunctionInfo(functionDefinition: Function) = 
+let FunctionInfo(functionDefinition: Function) =
     let selectedTab, setSelectedTab = React.useState "docs"
     let docs = Examples.parseDocumentation (defaultArg functionDefinition.description "")
     React.fragment [
-        Div("tabs", [
-            Html.ul [
-                Html.li [
-                    prop.className (if selectedTab = "docs" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "docs")
-                            prop.text "Docs"
-                        ]
-                    ]
-                ]
-                Html.li [
-                    prop.className (if selectedTab = "inputs" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "inputs")
-                            prop.text "Inputs"
-                        ]
-                    ]
-                ]
-                Html.li [
-                    prop.className (if selectedTab = "outputs" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "outputs")
-                            prop.text "Outputs"
-                        ]
-                    ]
-                ]
-                Html.li [
-                    prop.className (if selectedTab = "examples" then "is-active" else "")
-                    prop.children [
-                        Html.a [
-                            prop.onClick (fun _ -> setSelectedTab "examples")
-                            prop.text "Examples"
-                        ]
-                    ]
-                ]
-            ]
-        ])
+        Tabs [
+            Tab("Docs", "docs", selectedTab, setSelectedTab)
+            Tab("Inputs", "inputs", selectedTab, setSelectedTab)
+            Tab("Outputs", "outputs", selectedTab, setSelectedTab)
+            Tab("Examples", "examples", selectedTab, setSelectedTab)
+        ]
 
         match selectedTab with
         | "docs" -> MarkdownContent docs.description
-        | "inputs" ->  
+        | "inputs" ->
             match functionDefinition.inputs with
-            | None -> Html.none
+            | None -> Html.p "No inputs"
             | Some inputs ->
                 MarkdownContent (defaultArg inputs.description "")
-                RenderProperties(inputs.properties)
-        | "outputs" -> 
-            match functionDefinition.returnType with 
+                RenderProperties inputs.properties
+        | "outputs" ->
+            match functionDefinition.returnType with
             | SchemaType.Object properties -> RenderProperties properties
-            | _ -> Html.text (renderType functionDefinition.returnType)
+            | _ -> RenderType functionDefinition.returnType
         | "examples" ->
             ExamplesDropdown docs
-        | _ -> 
+        | _ ->
             Html.p [ prop.text $"Unknown tab: {selectedTab}" ]
     ]
 
 
 [<ReactComponent>]
-let SchemaResources(name: string, version: string, schema: Schema) = 
+let SchemaResources(name: string, version: string, schema: Schema) =
     let selectedModule, setSelectedModule = React.useState<string option>(None)
     let selectedResource, setSelectedResource = React.useState<Resource option>(None)
-    let selectedResourceValue = React.useMemo((fun () -> 
+    let selectedResourceValue = React.useMemo((fun () ->
         match selectedResource with
         | Some resource -> resource.token
         | None -> ""), [| selectedResource |])
-    
-    let inline modules() = 
+
+    let inline modules() =
         [
             { value = "_all_"; name = "All"; disabled = false }
             for modName in findModules schema do
@@ -338,9 +290,9 @@ let SchemaResources(name: string, version: string, schema: Schema) =
 
     let hasManyModules = React.useMemo(hasManyModules, [| schema |])
 
-    let inline resources() = 
+    let inline resources() =
         schema.resources.Values
-        |> Seq.filter (fun resource -> 
+        |> Seq.filter (fun resource ->
             match selectedModule with
             | Some "_all_" -> true
             | Some modName -> modName = moduleName resource.token
@@ -369,7 +321,7 @@ let SchemaResources(name: string, version: string, schema: Schema) =
             ]
 
             Html.br [ ]
-    
+
         Html.p $"Resources in {name} v{version}"
         SelectSearch.selectSearch [
             selectSearch.id "resources"
@@ -379,7 +331,7 @@ let SchemaResources(name: string, version: string, schema: Schema) =
             selectSearch.options resources
             selectSearch.search true
         ]
-        
+
         Html.br [ ]
 
         match selectedResource with
@@ -388,7 +340,7 @@ let SchemaResources(name: string, version: string, schema: Schema) =
     ]
 
 [<ReactComponent>]
-let SchemaFunctions(name: string, version: string, schema: Schema) = 
+let SchemaFunctions(name: string, version: string, schema: Schema) =
     let selectedModule, setSelectedModule = React.useState<string option>(None)
     let selectedFunction, setSelectedFunction = React.useState<Function option>(None)
     let selectedFunctionValue = React.useMemo((fun () ->
@@ -396,7 +348,7 @@ let SchemaFunctions(name: string, version: string, schema: Schema) =
         | Some func -> func.token
         | None -> ""), [| selectedFunction |])
 
-    let inline modules() = 
+    let inline modules() =
         [
             { value = "_all_"; name = "All"; disabled = false }
             for modName in findModules schema do
@@ -405,9 +357,9 @@ let SchemaFunctions(name: string, version: string, schema: Schema) =
 
     let modules = React.useMemo(modules, [| schema |])
 
-    let inline functions() = 
+    let inline functions() =
         schema.functions.Values
-        |> Seq.filter (fun func -> 
+        |> Seq.filter (fun func ->
             match selectedModule with
             | Some "_all_" -> true
             | Some modName -> modName = moduleName func.token
@@ -458,19 +410,19 @@ let SchemaFunctions(name: string, version: string, schema: Schema) =
 
             Html.br [ ]
 
-            match selectedFunction with 
+            match selectedFunction with
             | None -> Html.none
             | Some functionDefinition -> FunctionInfo(functionDefinition)
     ]
 
-let inline capitalize(input: string) = 
+let inline capitalize(input: string) =
     if String.IsNullOrWhiteSpace input then
         ""
-    else 
+    else
       input.[0].ToString().ToUpper() + input.[1..]
 
 [<ReactComponent>]
-let GeneralSchemaInfo(name: string, version: string, schema: Schema) = 
+let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
     React.fragment [
         Html.h1 [
             prop.style [ style.fontSize 24 ]
@@ -481,7 +433,7 @@ let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
         | Some description -> Html.p description
         | None -> Html.none
 
-        match schema.publisher with 
+        match schema.publisher with
         | Some publisher ->  Html.p $"Publisher {publisher}"
         | None -> Html.none
 
@@ -489,24 +441,24 @@ let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
         | Some repository -> Html.p $"Repository {repository}"
         | None -> Html.none
 
-        match schema.homepage with 
+        match schema.homepage with
         | Some homepage -> Html.p $"Homepage {homepage}"
         | None -> Html.none
 
-        match schema.license with 
+        match schema.license with
         | Some license -> Html.p $"License {license}"
         | None -> Html.none
     ]
 
 [<ReactComponent>]
-let ReleaseNotes(repository: string, version: string) = 
+let ReleaseNotes(repository: string, version: string) =
     let inline getReleaseNotes() = async {
         let fullRepoName = repository.Replace("https://", "").Replace("http://", "").Replace("github.com/", "")
         match fullRepoName.Split "/" with
-        | [| owner; repo |] -> 
+        | [| owner; repo |] ->
             let request = { Owner = owner; Repository = repo; Version = version }
             return! schemaExplorerApi.getReleaseNotes request
-        | _ -> 
+        | _ ->
             return ""
     }
 
@@ -514,13 +466,13 @@ let ReleaseNotes(repository: string, version: string) =
     match releaseNotes with
     | Deferred.HasNotStartedYet -> Html.none
     | Deferred.InProgress -> Html.p "Loading release notes"
-    | Deferred.Failed ex -> 
-        Html.p [ 
+    | Deferred.Failed ex ->
+        Html.p [
             prop.style [ style.color "red" ]
             prop.text (ex.Message)
         ]
 
-    | Deferred.Resolved releaseNotesBody -> 
+    | Deferred.Resolved releaseNotesBody ->
         Html.div [
             prop.className "content"
             prop.children [
@@ -529,7 +481,7 @@ let ReleaseNotes(repository: string, version: string) =
         ]
 
 [<ReactComponent>]
-let PluginSchemaExplorer(name: string, version: string, tab: string) = 
+let PluginSchemaExplorer(name: string, version: string, tab: string) =
     let schema = React.useDeferred(schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, [| name; version |])
     let selectedTab, setSelectedTab = React.useState(tab)
 
@@ -537,95 +489,54 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
         match schema with
         | Deferred.HasNotStartedYet -> Html.none
         | Deferred.InProgress -> Html.p "Loading schema information, this may take a moment..."
-        | Deferred.Failed ex -> 
-            Html.p [ 
+        | Deferred.Failed ex ->
+            Html.p [
                 prop.style [ style.color "red" ]
                 prop.text (ex.Message)
             ]
 
-        | Deferred.Resolved (Error schemaError) -> 
-            Html.p [ 
+        | Deferred.Resolved (Error schemaError) ->
+            Html.p [
                 prop.style [ style.color "red" ]
                 prop.text schemaError
             ]
 
         | Deferred.Resolved (Ok schema) ->
-
-            Html.div [
-                prop.className "tabs"
-                prop.children [
-                    Html.ul [
-                        Html.li [
-                            prop.className [ if selectedTab = "general" then "is-active" ]
-                            prop.children [
-                                Html.a [
-                                    prop.onClick (fun _ -> setSelectedTab "general")
-                                    prop.text "General"
-                                ]
-                            ]
-                        ]
-                        Html.li [
-                            prop.className [ if selectedTab = "resources" then "is-active" ]
-                            prop.children [
-                                Html.a [
-                                    prop.onClick (fun _ -> setSelectedTab "resources")
-                                    prop.text $"Resources ({Map.count schema.resources})"
-                                ]
-                            ]
-                        ]
-                        Html.li [
-                            prop.className [ if selectedTab = "functions" then "is-active" else "" ]
-                            prop.children [
-                                Html.a [
-                                    prop.onClick (fun _ -> setSelectedTab "functions")
-                                    prop.text $"Functions ({Map.count schema.functions})"
-                                ]
-                            ]
-                        ]
-
-                        match schema.repository with 
-                        | Some repo -> 
-                            Html.li [
-                                prop.className [ if selectedTab = "release-notes" then "is-active" else "" ]
-                                prop.children [
-                                    Html.a [
-                                        prop.onClick (fun _ -> setSelectedTab "release-notes")
-                                        prop.text "Release Notes"
-                                    ]
-                                ]
-                            ]
-
-                        | None -> Html.none
-                    ]
-                ]
+            Tabs [
+                Tab("General", "general", selectedTab, setSelectedTab)
+                Tab($"Resources ({Map.count schema.resources})", "resources", selectedTab, setSelectedTab)
+                Tab($"Functions ({Map.count schema.functions})", "functions", selectedTab, setSelectedTab)
+                match schema.repository with
+                | Some repo -> Tab("Release Notes", "release-notes", selectedTab, setSelectedTab)
+                | None -> Html.none
             ]
 
             match selectedTab with
             | "general" -> GeneralSchemaInfo(name, version, schema)
             | "resources" -> SchemaResources(name, version, schema)
             | "functions" -> SchemaFunctions(name, version, schema)
-            | "release-notes" -> 
+            | "release-notes" ->
                 match schema.repository with
                 | Some repoUrl -> ReleaseNotes(repoUrl, version)
                 | None -> Html.none
 
-            | otherwise -> Html.p $"Unknown tab: {otherwise}"
+            | otherwise -> Html.none
         ]
 
 [<ReactComponent>]
-let GithubReleases(repo: string) = 
+let GithubReleases(repo: string) =
     let githubReleases = React.useDeferred(schemaExplorerApi.findGithubReleases repo, [| repo |])
     let selectedRelease, setSelectedRelease = React.useState<string option>(None)
-    let inline searchResults() = 
-        match githubReleases with 
-        | Deferred.Resolved releases -> 
+    let inline searchResults() =
+        match githubReleases with
+        | Deferred.Resolved releases ->
             [
                 for release in releases -> {
                     value = release
                     name = release
                     disabled = false
                 }
-            ] 
+            ]
 
         | _ -> [ ]
 
@@ -633,24 +544,24 @@ let GithubReleases(repo: string) =
     SelectSearch.selectSearch [
         selectSearch.id "github-releases"
         selectSearch.placeholder (
-            if Deferred.inProgress githubReleases 
-            then "Loading releases" 
+            if Deferred.inProgress githubReleases
+            then "Loading releases"
             elif List.isEmpty options
             then "No releases found"
             else "Pick a release to explore"
         )
-        selectSearch.onChange (fun version -> 
+        selectSearch.onChange (fun version ->
             setSelectedRelease(Some version)
             match repo.Split "/" with
             | [| "pulumi"; repoName |] when repoName.StartsWith "pulumi-" ->
                 let firstPartyPulumiPlugin = repoName.Replace("pulumi-", "")
                 Router.navigate(firstPartyPulumiPlugin, version)
 
-            | [| owner; repoName |] when repoName.StartsWith "pulumi-" -> 
+            | [| owner; repoName |] when repoName.StartsWith "pulumi-" ->
                 let thirdPartyPulumiPlugin = repoName.Replace("pulumi-", "")
                 Router.navigate("third-party-plugin", owner, thirdPartyPulumiPlugin, version)
 
-            | otherwise -> 
+            | otherwise ->
                 Router.navigate("unknown-pulumi-plugin")
         )
         selectSearch.value (defaultArg selectedRelease "")
@@ -660,18 +571,18 @@ let GithubReleases(repo: string) =
     ]
 
 [<ReactComponent>]
-let SearchGithub() = 
+let SearchGithub() =
     let inputRef = React.useInputRef()
     let selectedRepo, setSelectedRepo = React.useState<string option>(None)
     let searchResults, setSearchResults = React.useState(Deferred.HasNotStartedYet)
     let search = React.useDeferredCallback(schemaExplorerApi.searchGithub, setSearchResults)
 
-    let inline searchResultOptions() = 
-        match searchResults with 
-        | Deferred.Resolved results -> 
+    let inline searchResultOptions() =
+        match searchResults with
+        | Deferred.Resolved results ->
             [ for result in results -> { value = result; name = result; disabled = false } ]
-        
-        | _ -> 
+
+        | _ ->
             [ ]
 
     let options = React.useMemo(searchResultOptions, [| searchResults |])
@@ -682,7 +593,7 @@ let SearchGithub() =
             prop.placeholder "Type a repository's name"
             prop.style [ style.marginBottom 10 ]
             prop.ref inputRef
-            prop.onKeyUp(key.enter, fun ev -> 
+            prop.onKeyUp(key.enter, fun ev ->
                 setSelectedRepo None
                 inputRef.current
                 |> Option.iter (fun element -> search element.value)
@@ -691,8 +602,8 @@ let SearchGithub() =
 
         SelectSearch.selectSearch [
             selectSearch.placeholder (
-                if Deferred.inProgress searchResults 
-                then "Loading" 
+                if Deferred.inProgress searchResults
+                then "Loading"
                 elif List.isEmpty options
                 then "Search results"
                 else "Pick a repository from search results"
@@ -705,17 +616,17 @@ let SearchGithub() =
                 selectSearch.printOptions.always
         ]
 
-        match selectedRepo with 
-        | Some repo -> 
+        match selectedRepo with
+        | Some repo ->
             Html.div [ prop.style [ style.marginBottom 5 ] ]
             GithubReleases(repo)
 
-        | None -> 
+        | None ->
             Html.none
     ]
 
 [<ReactComponent>]
-let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) = 
+let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) =
     let inline requestInput() = {
         Owner = owner
         PluginName = plugin
@@ -723,19 +634,19 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) =
     }
 
     let installation = React.useDeferred(schemaExplorerApi.installThirdPartyPlugin(requestInput()), [| owner; plugin; version |])
-    
-    let inline redirectWhenInstalled() = 
-        match installation with 
-        | Deferred.Resolved (Ok ()) -> 
+
+    let inline redirectWhenInstalled() =
+        match installation with
+        | Deferred.Resolved (Ok ()) ->
             Router.navigate(plugin, version)
-        | _ -> 
+        | _ ->
             ignore()
-    
+
     React.useEffect(redirectWhenInstalled, [| box installation |])
 
     match installation with
-    | Deferred.HasNotStartedYet -> Html.none 
-    | Deferred.InProgress -> 
+    | Deferred.HasNotStartedYet -> Html.none
+    | Deferred.InProgress ->
         Html.div [
             prop.className "block"
             prop.children [
@@ -751,19 +662,19 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) =
             ]
         ]
 
-    | Deferred.Failed error -> 
+    | Deferred.Failed error ->
         Html.p [
             prop.style [ style.color.red ]
             prop.text error.Message
         ]
 
-    | Deferred.Resolved (Error errorMessage) -> 
+    | Deferred.Resolved (Error errorMessage) ->
         Html.p [
             prop.style [ style.color.darkOrchid ]
             prop.text errorMessage
         ]
 
-    | Deferred.Resolved (Ok ()) -> 
+    | Deferred.Resolved (Ok ()) ->
         Html.none
 
 
@@ -801,8 +712,8 @@ let View() =
                     ]
 
                     Html.div [
-                        prop.style [ 
-                            style.custom("flex", "80%") 
+                        prop.style [
+                            style.custom("flex", "80%")
                             style.paddingRight 30
                             style.paddingLeft 30
                         ]
@@ -811,13 +722,13 @@ let View() =
                                 router.onUrlChanged setCurrentUrl
                                 router.children [
                                     match currentUrl with
-                                    | [ "unknown-pulumi-plugin" ] -> 
+                                    | [ "unknown-pulumi-plugin" ] ->
                                         Html.p "Selected repository is not a Pulumi plugin"
-                                    | [ "third-party-plugin"; owner; name; version ] -> 
+                                    | [ "third-party-plugin"; owner; name; version ] ->
                                         InstallThirdPartyPlugin(owner, name, version)
-                                    | [ name; version ] -> 
+                                    | [ name; version ] ->
                                         PluginSchemaExplorer(name, version, "general")
-                                    | _ -> 
+                                    | _ ->
                                         Html.p "Select a plugin to explore"
                                 ]
                             ]
