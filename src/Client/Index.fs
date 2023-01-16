@@ -1002,9 +1002,20 @@ let View() =
     Html.div [
         prop.style [ style.margin 20 ]
         prop.children [
-            Html.h1 [
-                prop.style [ style.fontSize 24 ]
-                prop.text "Pulumi Schema Explorer"
+        
+            Html.span [
+                prop.style [ style.fontSize 24; style.display.flex; style.justifyContent.left; style.alignContent.center ]
+                prop.children [
+                    Html.img [
+                        prop.src "https://www.pulumi.com/logos/brand/avatar-on-white.png"
+                        prop.style [ style.height 50; style.marginRight 20 ]
+                    ]
+
+                    Html.span [
+                        prop.style [ style.marginTop 6 ]
+                        prop.text "Pulumi Schema Explorer"
+                    ]
+                ]
             ]
 
             Html.hr [ ]
