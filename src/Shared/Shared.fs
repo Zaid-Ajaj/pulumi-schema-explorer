@@ -14,10 +14,39 @@ type GetReleaseNotesRequest = {
     Version: string 
 }
 
+type GetSchemaVersionsRequest = { 
+    Owner: string
+    Repository: string
+}
+
 type InstallThirdPartyPluginRequest = {
     Owner: string
     PluginName: string
     Version: string
+}
+
+type DiffSchemaRequest = {
+    Plugin: string 
+    VersionA: string
+    VersionB: string
+}
+
+[<RequireQualifiedAccess>]
+type ResourceChange = 
+    | AddedProperty of string * Property
+    | RemovedProperty of string * Property
+
+type ChangedResource = {
+    Resource: Resource
+    Changes: ResourceChange list
+}
+
+type DiffResult = {
+    AddedResources: Resource list
+    RemovedResources: Resource list
+    AddedFunctions: Function list
+    RemovedFunctions: Function list
+    ChangedResources: ChangedResource list
 }
 
 type ISchemaExplorerApi = { 
@@ -27,4 +56,6 @@ type ISchemaExplorerApi = {
     findGithubReleases : string -> Async<string list> 
     getReleaseNotes : GetReleaseNotesRequest -> Async<string>
     installThirdPartyPlugin : InstallThirdPartyPluginRequest -> Async<Result<unit, string>>
+    getSchemaVersionsFromGithub : GetSchemaVersionsRequest -> Async<string list>
+    diffSchema : DiffSchemaRequest -> Async<Result<DiffResult, string>>
 }

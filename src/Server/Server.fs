@@ -70,15 +70,20 @@ let getSchemaByPlugin(plugin: PluginReference) =
         return PulumiSchema.SchemaLoader.FromPulumi(plugin.Name, plugin.Version)
     }
 
-let getReleaseNotes (req: GetReleaseNotesRequest) = 
+let rec getReleaseNotes (req: GetReleaseNotesRequest) = 
     task {
-        let! repository = github.Repository.Get(req.Owner, req.Repository)
-        let! releases = github.Repository.Release.GetAll(repository.Id)
-        return
-            releases
-            |> Seq.tryFind (fun release -> version release = Some req.Version)
-            |> Option.map (fun release -> release.Body)
-            |> Option.defaultValue ""
+        try
+            let! repository = github.Repository.Get(req.Owner, req.Repository)
+            let! releases = github.Repository.Release.GetAll(repository.Id)
+            return
+                releases
+                |> Seq.tryFind (fun release -> version release = Some req.Version)
+                |> Option.map (fun release -> release.Body)
+                |> Option.defaultValue ""
+        with
+            | :? RateLimitExceededException -> 
+                do! Task.Delay 5000
+                return! getReleaseNotes req
     }
 
 let installThirdPartyPlugin (req: InstallThirdPartyPluginRequest) = 
@@ -95,6 +100,79 @@ let installThirdPartyPlugin (req: InstallThirdPartyPluginRequest) =
             return Error(command.StandardError)
     }
 
+let rec getSchemaVersionsFromGithub (req: GetSchemaVersionsRequest) = 
+    task {
+        try 
+            let! repository = github.Repository.Get(req.Owner, req.Repository)
+            let! releases = github.Repository.Release.GetAll(repository.Id)
+            return
+                releases
+                |> Seq.choose (fun release -> version release)
+                |> List.ofSeq
+        with
+            | :? RateLimitExceededException -> 
+                do! Task.Delay 5000
+                return! getSchemaVersionsFromGithub req
+    }
+
+let diffSchema (req: DiffSchemaRequest) = 
+    task {
+        let schemaA = PulumiSchema.SchemaLoader.FromPulumi(req.Plugin, req.VersionA)
+        let schemaB = PulumiSchema.SchemaLoader.FromPulumi(req.Plugin, req.VersionB)
+
+        let emptyDiff = {
+            AddedResources = [ ]
+            RemovedResources = [ ]
+            AddedFunctions = [ ]
+            RemovedFunctions = [ ]
+            ChangedResources = [ ]
+        }
+
+        match schemaA, schemaB with
+        | Error error, _ -> return Error error
+        | _, Error error -> return Error error
+        | Ok schemaA, Ok schemaB -> 
+            let addedResources = [
+                for resource in schemaB.resources do
+                    if not (Map.containsKey resource.Key schemaA.resources) then
+                        resource.Value
+            ]
+
+            let removedResources = [
+                for resource in schemaA.resources do
+                    if not (Map.containsKey resource.Key schemaB.resources) then
+                        resource.Value
+            ]
+
+            let changedResources = [
+                for resource in schemaA.resources do
+                    let resourceA = resource.Value
+                    if Map.containsKey resourceA.token schemaB.resources then
+                        let resourceB = schemaB.resources.[resourceA.token]
+                        let changes = [ 
+                            for property in resourceB.properties do
+                                let propertyName = property.Key
+                                let propertyB = property.Value
+                                if not (Map.containsKey property.Key resourceA.properties) then
+                                    ResourceChange.AddedProperty(propertyName, propertyB)
+                            
+                            for property in resourceA.properties do
+                                let propertyName = property.Key
+                                let propertyA = property.Value
+                                if not (Map.containsKey property.Key resourceB.properties) then
+                                    ResourceChange.RemovedProperty(propertyName, propertyA)
+                        ]
+
+                        if changes.Length > 0 then yield { Resource = resourceA; Changes = changes }
+            ]
+
+            return Ok { 
+                emptyDiff with 
+                    AddedResources = addedResources
+                    RemovedResources = removedResources
+                    ChangedResources = changedResources }
+    }
+
 let schemaExplorerApi = { 
     getLocalPlugins = getLocalPlugins >> Async.AwaitTask
     getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
@@ -102,6 +180,8 @@ let schemaExplorerApi = {
     findGithubReleases = findGithubReleases >> Async.AwaitTask
     getReleaseNotes = getReleaseNotes >> Async.AwaitTask
     installThirdPartyPlugin = installThirdPartyPlugin >> Async.AwaitTask
+    getSchemaVersionsFromGithub = getSchemaVersionsFromGithub >> Async.AwaitTask
+    diffSchema = diffSchema >> Async.AwaitTask
 }
 
 let pulumiSchemaDocs = Remoting.documentation "Pulumi Schema Explorer" [ ]

@@ -481,6 +481,93 @@ let ReleaseNotes(repository: string, version: string) =
         ]
 
 [<ReactComponent>]
+let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) = 
+    let fullRepoName = repository.Replace("https://", "").Replace("http://", "").Replace("github.com/", "")
+    let inline getVersions() = async {
+        match fullRepoName.Split "/" with
+        | [| owner; repo |] ->
+            let request = { Owner = owner; Repository = repo }
+            return! schemaExplorerApi.getSchemaVersionsFromGithub request
+        | _ ->
+            return [ ]
+    }
+
+    let versions = React.useDeferred(getVersions(), [| repository |])
+    
+    match versions with 
+    | Deferred.HasNotStartedYet -> 
+        Html.none
+
+    | Deferred.InProgress -> 
+        Div("block", [
+            Html.p "Loading versions"
+            Html.progress [
+                prop.className "progress is-small is-primary"
+                prop.max 100
+            ]
+        ])
+
+    | Deferred.Failed ex ->
+        Html.p [
+            prop.style [ style.color "red" ]
+            prop.text (ex.Message)
+        ]
+
+    | Deferred.Resolved versions ->
+        Html.ul [
+            for version in versions do
+            let isCurrentVersion = version = schemaVersion
+            Html.li [
+                prop.style [ style.marginBottom 20 ]
+                prop.children [
+                    Html.p [
+                        prop.style [ style.fontSize 18 ]
+                        prop.text $"{capitalize(schema.name)} v{version}"
+                    ]
+                    Html.button [
+                        prop.className [ "button"; if not isCurrentVersion then "is-primary" ]
+                        prop.style [ style.marginRight 10 ]
+                        prop.text "Explore"
+                        prop.disabled isCurrentVersion
+                        prop.onClick (fun _ -> 
+                            match fullRepoName.Split "/" with
+                            | [| "pulumi"; repoName |] when repoName.StartsWith "pulumi-" ->
+                                let firstPartyPulumiPlugin = repoName.Replace("pulumi-", "")
+                                Router.navigate(firstPartyPulumiPlugin, version)
+
+                            | [| owner; repoName |] when repoName.StartsWith "pulumi-" ->
+                                let thirdPartyPulumiPlugin = repoName.Replace("pulumi-", "")
+                                Router.navigate("third-party-plugin", owner, thirdPartyPulumiPlugin, version)
+
+                            | otherwise ->
+                                Router.navigate("unknown-pulumi-plugin")
+                        )
+                    ]
+
+                    Html.button [
+                        prop.className [ "button"; if not isCurrentVersion then "is-primary" ]
+                        prop.disabled isCurrentVersion
+                        prop.text "Diff"
+                        prop.onClick (fun _ -> 
+                            match fullRepoName.Split "/" with
+                            | [| "pulumi"; repoName |] when repoName.StartsWith "pulumi-" ->
+                                let firstPartyPulumiPlugin = repoName.Replace("pulumi-", "")
+                                Router.navigate("diff", firstPartyPulumiPlugin, schemaVersion, version)
+
+                            | [| owner; repoName |] when repoName.StartsWith "pulumi-" ->
+                                let thirdPartyPulumiPlugin = repoName.Replace("pulumi-", "")
+                                Router.navigate("diff-third-party-plugin", owner, thirdPartyPulumiPlugin, schemaVersion, version)
+                            
+                            | otherwise ->
+                                Router.navigate("unknown-pulumi-plugin")
+                        )
+                    ]
+                ]
+            ]
+        ]
+
+
+[<ReactComponent>]
 let PluginSchemaExplorer(name: string, version: string, tab: string) =
     let schema = React.useDeferred(schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, [| name; version |])
     let selectedTab, setSelectedTab = React.useState(tab)
@@ -507,7 +594,9 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
                 Tab($"Resources ({Map.count schema.resources})", "resources", selectedTab, setSelectedTab)
                 Tab($"Functions ({Map.count schema.functions})", "functions", selectedTab, setSelectedTab)
                 match schema.repository with
-                | Some repo -> Tab("Release Notes", "release-notes", selectedTab, setSelectedTab)
+                | Some repo -> 
+                    Tab("Release Notes", "release-notes", selectedTab, setSelectedTab)
+                    Tab("Versions", "versions", selectedTab, setSelectedTab)
                 | None -> Html.none
             ]
 
@@ -519,6 +608,12 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
                 match schema.repository with
                 | Some repoUrl -> ReleaseNotes(repoUrl, version)
                 | None -> Html.none
+
+            | "versions" -> 
+                match schema.repository with
+                | Some repoUrl -> SchemaVersions(repoUrl, version, schema)
+                | None -> Html.none
+
 
             | otherwise -> Html.none
         ]
@@ -626,7 +721,7 @@ let SearchGithub() =
     ]
 
 [<ReactComponent>]
-let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) =
+let InstallThirdPartyPlugin(owner: string, plugin: string, version: string, onInstalled: unit -> unit) =
     let inline requestInput() = {
         Owner = owner
         PluginName = plugin
@@ -638,7 +733,7 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) =
     let inline redirectWhenInstalled() =
         match installation with
         | Deferred.Resolved (Ok ()) ->
-            Router.navigate(plugin, version)
+            onInstalled()
         | _ ->
             ignore()
 
@@ -677,6 +772,204 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string) =
     | Deferred.Resolved (Ok ()) ->
         Html.none
 
+[<ReactComponent>]
+let PluginSchemaDiff(name, versionA, versionB) = 
+    let selectedTab, setSelectedTab = React.useState "added-resources"
+    let diffResults = React.useDeferred(
+        schemaExplorerApi.diffSchema { Plugin = name; VersionA = versionA; VersionB = versionB }, 
+        [| name; versionA |])
+    
+    React.fragment [
+        Html.h1 [
+            prop.className "subtitle"
+            prop.children [
+                Html.text $"Diff of {capitalize(name)} v{versionA} "
+                Html.i [ prop.className "fas fa-arrow-right" ]
+                Html.text $" v{versionB}"
+            ]
+        ]
+
+        match diffResults with 
+        | Deferred.HasNotStartedYet -> Html.none
+        | Deferred.InProgress -> 
+            Html.div [
+                prop.className "block"
+                prop.children [
+                    Html.p [
+                        prop.style [ style.marginBottom 5 ]
+                        prop.text $"Loading diff of {capitalize(name)} v{versionA} and v{versionB}..."
+                    ]
+
+                    Html.progress [
+                        prop.className "progress is-small is-primary"
+                        prop.max 100
+                    ]
+                ]
+            ]
+
+        | Deferred.Failed error ->
+            Html.p [
+                prop.style [ style.color.red ]
+                prop.text error.Message
+            ]
+
+        | Deferred.Resolved (Error errorMessage) ->
+            Html.p [
+                prop.style [ style.color.darkOrchid ]
+                prop.text errorMessage
+            ]
+
+        | Deferred.Resolved (Ok diff) ->
+            Tabs [
+                Tab("Added resources", "added-resources", selectedTab, setSelectedTab)
+                Tab("Removed resources", "removed-resources", selectedTab, setSelectedTab)
+                Tab("Changed resources", "changed-resources", selectedTab, setSelectedTab)
+            ]
+            
+            match selectedTab with
+            | "added-resources" -> 
+                Html.ul [
+                    for resource in diff.AddedResources do
+                    Html.li [
+                        prop.style [ style.color.green ]
+                        prop.children [
+                            Html.i [ 
+                                prop.className "fas fa-plus"; 
+                                prop.style [ style.marginRight 10 ]
+                            ]
+                        
+                            Html.span [ 
+                                prop.style [ style.fontSize 18; style.marginRight 10 ]
+                                prop.text (memberName resource.token)
+                            ]
+
+                            Html.span [ 
+                                prop.style [ style.fontSize 12; style.color.black ]
+                                prop.text (resource.token)
+                            ]
+                        ]
+                    ] 
+                ]
+
+            | "removed-resources" -> 
+                Html.ul [
+                    for resource in diff.RemovedResources do
+                    Html.li [
+                        prop.style [ style.color.red ]
+                        prop.children [
+                            Html.i [ 
+                                prop.className "fas fa-minus"; 
+                                prop.style [ style.marginRight 10 ]
+                            ]
+                        
+                            Html.span [ 
+                                prop.style [ style.fontSize 18; style.marginRight 10 ]
+                                prop.text (memberName resource.token)
+                            ]
+
+                            Html.span [ 
+                                prop.style [ style.fontSize 14; style.color.black ]
+                                prop.text (resource.token)
+                            ]
+                        ]
+                    ] 
+                ]
+
+            | "changed-resources" ->
+                Html.ul [
+                    for changedResource in diff.ChangedResources do
+                    Html.li [
+                        prop.style [ style.color.blue; style.marginBottom 20 ]
+                        prop.children [
+                            Html.i [ 
+                                prop.className "fas fa-exchange-alt"; 
+                                prop.style [ style.marginRight 10 ]
+                            ]
+                        
+                            Html.span [ 
+                                prop.style [ style.fontSize 18; style.marginRight 10 ]
+                                prop.text (memberName changedResource.Resource.token)
+                            ]
+
+                            Html.span [ 
+                                prop.style [ style.fontSize 12; style.color.black ]
+                                prop.text changedResource.Resource.token
+                            ]
+
+                            Html.ul [
+                                prop.style [ style.marginLeft 20 ]
+                                prop.children [
+                                    for change in changedResource.Changes do
+                                    Html.li [
+                                        prop.style [ style.marginBottom 10 ]
+                                        prop.children [
+                                            match change with 
+                                            | ResourceChange.AddedProperty (name, property) -> 
+                                                Html.i [ 
+                                                    prop.className "fas fa-plus"; 
+                                                    prop.style [ style.marginRight 10; style.color.green ]
+                                                ]
+                                            
+                                                Html.span [ 
+                                                    prop.style [ style.fontSize 18; style.marginRight 10; style.color.green ]
+                                                    prop.children [
+                                                        Html.text $"{name} "
+                                                        Html.span [
+                                                            prop.style [ style.color.black; style.fontSize 12 ]
+                                                            prop.children [
+                                                                Html.text "("
+                                                                RenderType property.schemaType
+                                                                Html.text ")"
+                                                            ]
+                                                        ]
+                                                    ]
+                                                ]
+
+                                                Html.span [ 
+                                                    prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
+                                                    prop.children [
+                                                        MarkdownContent (defaultArg property.description "")
+                                                    ]
+                                                ]
+
+                                            | ResourceChange.RemovedProperty (name, property) -> 
+                                                Html.i [ 
+                                                    prop.className "fas fa-minus"; 
+                                                    prop.style [ style.marginRight 10; style.color.red ]
+                                                ]
+                                            
+                                                Html.span [ 
+                                                    prop.style [ style.fontSize 18; style.marginRight 10; style.color.red ]
+                                                    prop.children [
+                                                        Html.text $"{name} "
+                                                        Html.span [
+                                                            prop.style [ style.color.black; style.fontSize 12 ]
+                                                            prop.children [
+                                                                Html.text "("
+                                                                RenderType property.schemaType
+                                                                Html.text ")"
+                                                            ]
+                                                        ]
+                                                    ]
+                                                ]
+
+                                                Html.span [ 
+                                                    prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
+                                                    prop.children [
+                                                        MarkdownContent (defaultArg property.description "")
+                                                    ]
+                                                ]
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ] 
+                ]
+
+            | _ -> 
+                Html.p "Unknown tab"
+    ]
 
 [<ReactComponent>]
 let View() =
@@ -724,8 +1017,14 @@ let View() =
                                     match currentUrl with
                                     | [ "unknown-pulumi-plugin" ] ->
                                         Html.p "Selected repository is not a Pulumi plugin"
+                                    | [ "diff"; name; versionA; verionB ] -> 
+                                        PluginSchemaDiff(name, versionA, verionB)
+                                    | [ "diff-third-party-plugin"; owner; name; versionA; versionB ] ->
+                                        let onInstall() = Router.navigate("diff", name, versionA, versionB)
+                                        InstallThirdPartyPlugin(owner, name, versionB, onInstall)
                                     | [ "third-party-plugin"; owner; name; version ] ->
-                                        InstallThirdPartyPlugin(owner, name, version)
+                                        let onInstalled() = Router.navigate(name, version)
+                                        InstallThirdPartyPlugin(owner, name, version, onInstalled)
                                     | [ name; version ] ->
                                         PluginSchemaExplorer(name, version, "general")
                                     | _ ->
