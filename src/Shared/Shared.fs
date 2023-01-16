@@ -38,7 +38,8 @@ type ResourceChange =
 
 type ChangedResource = {
     Resource: Resource
-    Changes: ResourceChange list
+    Inputs: ResourceChange list
+    Outputs: ResourceChange list
 }
 
 type DiffResult = {

@@ -149,7 +149,7 @@ let diffSchema (req: DiffSchemaRequest) =
                     let resourceA = resource.Value
                     if Map.containsKey resourceA.token schemaB.resources then
                         let resourceB = schemaB.resources.[resourceA.token]
-                        let changes = [ 
+                        let outputsChanges = [ 
                             for property in resourceB.properties do
                                 let propertyName = property.Key
                                 let propertyB = property.Value
@@ -163,7 +163,22 @@ let diffSchema (req: DiffSchemaRequest) =
                                     ResourceChange.RemovedProperty(propertyName, propertyA)
                         ]
 
-                        if changes.Length > 0 then yield { Resource = resourceA; Changes = changes }
+                        let inputsChanges = [
+                            for property in resourceB.inputProperties do
+                                let propertyName = property.Key
+                                let propertyB = property.Value
+                                if not (Map.containsKey property.Key resourceA.inputProperties) then
+                                    ResourceChange.AddedProperty(propertyName, propertyB)
+
+                            for property in resourceA.inputProperties do
+                                let propertyName = property.Key
+                                let propertyA = property.Value
+                                if not (Map.containsKey property.Key resourceB.inputProperties) then
+                                    ResourceChange.RemovedProperty(propertyName, propertyA)
+                        ]
+    
+                        if inputsChanges.Length > 0 || outputsChanges.Length > 0 then 
+                            yield { Resource = resourceA; Inputs = inputsChanges; Outputs = outputsChanges }
             ]
 
             return Ok { 

@@ -575,7 +575,15 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
     React.fragment [
         match schema with
         | Deferred.HasNotStartedYet -> Html.none
-        | Deferred.InProgress -> Html.p "Loading schema information, this may take a moment..."
+        | Deferred.InProgress -> 
+            Div("block", [
+                Html.p "Loading schema information, this may take a moment..."
+                Html.progress [
+                    prop.className "progress is-small is-primary"
+                    prop.max 100
+                ]
+            ])
+
         | Deferred.Failed ex ->
             Html.p [
                 prop.style [ style.color "red" ]
@@ -773,6 +781,77 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string, onIn
         Html.none
 
 [<ReactComponent>]
+let RenderResourceChanges(changes: ResourceChange list) = 
+    Html.ul [
+        prop.style [ style.marginLeft 20 ]
+        prop.children [
+            for change in changes do
+            Html.li [
+                prop.style [ style.marginBottom 10 ]
+                prop.children [
+                    match change with 
+                    | ResourceChange.AddedProperty (name, property) -> 
+                        Html.i [ 
+                            prop.className "fas fa-plus"; 
+                            prop.style [ style.marginRight 10; style.color.green ]
+                        ]
+                    
+                        Html.span [ 
+                            prop.style [ style.fontSize 18; style.marginRight 10; style.color.green ]
+                            prop.children [
+                                Html.text $"{name} "
+                                Html.span [
+                                    prop.style [ style.color.black; style.fontSize 12 ]
+                                    prop.children [
+                                        Html.text "("
+                                        RenderType property.schemaType
+                                        Html.text ")"
+                                    ]
+                                ]
+                            ]
+                        ]
+
+                        Html.span [ 
+                            prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
+                            prop.children [
+                                MarkdownContent (defaultArg property.description "")
+                            ]
+                        ]
+
+                    | ResourceChange.RemovedProperty (name, property) -> 
+                        Html.i [ 
+                            prop.className "fas fa-minus"; 
+                            prop.style [ style.marginRight 10; style.color.red ]
+                        ]
+                    
+                        Html.span [ 
+                            prop.style [ style.fontSize 18; style.marginRight 10; style.color.red ]
+                            prop.children [
+                                Html.text $"{name} "
+                                Html.span [
+                                    prop.style [ style.color.black; style.fontSize 12 ]
+                                    prop.children [
+                                        Html.text "("
+                                        RenderType property.schemaType
+                                        Html.text ", output)"
+                                    ]
+                                ]
+                            ]
+                        ]
+
+                        Html.span [ 
+                            prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
+                            prop.children [
+                                MarkdownContent (defaultArg property.description "")
+                            ]
+                        ]
+                ]
+            ]
+        ]
+    ]
+
+
+[<ReactComponent>]
 let PluginSchemaDiff(name, versionA, versionB) = 
     let selectedTab, setSelectedTab = React.useState "added-resources"
     let diffResults = React.useDeferred(
@@ -821,9 +900,9 @@ let PluginSchemaDiff(name, versionA, versionB) =
 
         | Deferred.Resolved (Ok diff) ->
             Tabs [
-                Tab("Added resources", "added-resources", selectedTab, setSelectedTab)
-                Tab("Removed resources", "removed-resources", selectedTab, setSelectedTab)
-                Tab("Changed resources", "changed-resources", selectedTab, setSelectedTab)
+                Tab($"Added resources ({List.length diff.AddedResources})", "added-resources", selectedTab, setSelectedTab)
+                Tab($"Removed resources ({List.length diff.RemovedResources})", "removed-resources", selectedTab, setSelectedTab)
+                Tab($"Changed resources ({List.length diff.ChangedResources})", "changed-resources", selectedTab, setSelectedTab)
             ]
             
             match selectedTab with
@@ -879,7 +958,7 @@ let PluginSchemaDiff(name, versionA, versionB) =
                 Html.ul [
                     for changedResource in diff.ChangedResources do
                     Html.li [
-                        prop.style [ style.color.blue; style.marginBottom 20 ]
+                        prop.style [ style.color.darkGoldenRod; style.marginBottom 20 ]
                         prop.children [
                             Html.i [ 
                                 prop.className "fas fa-exchange-alt"; 
@@ -896,75 +975,21 @@ let PluginSchemaDiff(name, versionA, versionB) =
                                 prop.text changedResource.Resource.token
                             ]
 
-                            Html.ul [
-                                prop.style [ style.marginLeft 20 ]
-                                prop.children [
-                                    for change in changedResource.Changes do
-                                    Html.li [
-                                        prop.style [ style.marginBottom 10 ]
-                                        prop.children [
-                                            match change with 
-                                            | ResourceChange.AddedProperty (name, property) -> 
-                                                Html.i [ 
-                                                    prop.className "fas fa-plus"; 
-                                                    prop.style [ style.marginRight 10; style.color.green ]
-                                                ]
-                                            
-                                                Html.span [ 
-                                                    prop.style [ style.fontSize 18; style.marginRight 10; style.color.green ]
-                                                    prop.children [
-                                                        Html.text $"{name} "
-                                                        Html.span [
-                                                            prop.style [ style.color.black; style.fontSize 12 ]
-                                                            prop.children [
-                                                                Html.text "("
-                                                                RenderType property.schemaType
-                                                                Html.text ")"
-                                                            ]
-                                                        ]
-                                                    ]
-                                                ]
-
-                                                Html.span [ 
-                                                    prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
-                                                    prop.children [
-                                                        MarkdownContent (defaultArg property.description "")
-                                                    ]
-                                                ]
-
-                                            | ResourceChange.RemovedProperty (name, property) -> 
-                                                Html.i [ 
-                                                    prop.className "fas fa-minus"; 
-                                                    prop.style [ style.marginRight 10; style.color.red ]
-                                                ]
-                                            
-                                                Html.span [ 
-                                                    prop.style [ style.fontSize 18; style.marginRight 10; style.color.red ]
-                                                    prop.children [
-                                                        Html.text $"{name} "
-                                                        Html.span [
-                                                            prop.style [ style.color.black; style.fontSize 12 ]
-                                                            prop.children [
-                                                                Html.text "("
-                                                                RenderType property.schemaType
-                                                                Html.text ")"
-                                                            ]
-                                                        ]
-                                                    ]
-                                                ]
-
-                                                Html.span [ 
-                                                    prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
-                                                    prop.children [
-                                                        MarkdownContent (defaultArg property.description "")
-                                                    ]
-                                                ]
-                                        ]
-                                    ]
+                            if not changedResource.Inputs.IsEmpty then
+                                Html.p [
+                                    prop.style [ style.color.black ]
+                                    prop.text "Inputs"
                                 ]
-                            ]
+                                RenderResourceChanges changedResource.Inputs
+
+                            if not changedResource.Outputs.IsEmpty then
+                                Html.p [
+                                    prop.style [ style.color.black ]
+                                    prop.text "Outputs"
+                                ]
+                                RenderResourceChanges changedResource.Outputs
                         ]
-                    ] 
+                    ]
                 ]
 
             | _ -> 
