@@ -35,6 +35,7 @@ type DiffSchemaRequest = {
 type ResourceChange = 
     | AddedProperty of string * Property
     | RemovedProperty of string * Property
+    | MarkedDeprecated of string * Property
 
 type ChangedResource = {
     Resource: Resource

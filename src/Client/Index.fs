@@ -11,13 +11,11 @@ open PulumiSchema.Types
 open System
 open Fable.Remoting.Client
 open Fable.Core
-open Fable.Core.JsInterop
 
 let schemaExplorerApi =
     Remoting.createApi ()
     |> Remoting.withRouteBuilder Route.builder
     |> Remoting.buildProxy<ISchemaExplorerApi>
-
 
 [<ReactComponent>]
 let LocalPlugins() =
@@ -163,8 +161,23 @@ let ExamplesDropdown(docs: Examples.Documentation) =
                     MarkdownContent $"```{example.language}{example.code}```"
     ]
 
+
+
 [<ReactComponent>]
 let rec RenderType(schemaType) : ReactElement =
+
+    let canonicalToken (token: string) = 
+        match token.Split("::") with
+        | [| package; typeName |] -> Some (sprintf "%s:index:%s" package typeName)
+        | _ ->
+            match token.Split(":") with
+            | [| package; moduleName; typeName |] -> 
+                match moduleName.Split "/" with
+                | [| firstPart; secondPart |] -> Some (sprintf "%s:%s:%s" package firstPart typeName)
+                | _ -> Some (sprintf "%s:%s:%s" package moduleName typeName)
+            | _ ->
+                None
+    
     match schemaType with
     | SchemaType.String -> Html.text "string"
     | SchemaType.Number -> Html.text "number"
@@ -178,7 +191,39 @@ let rec RenderType(schemaType) : ReactElement =
         let renderedElementType = RenderType elementType
         Html.span [ Html.text "array<"; renderedElementType; Html.text">" ]
 
-    | SchemaType.Ref reference -> Html.text $"Ref: {reference}"
+    | SchemaType.Ref reference ->
+        let memberName (token: string) = 
+            match token.Split ':' with
+            | [| pkg; moduleName; memberName |] -> memberName
+            | _ -> token
+
+        match List.ofArray(reference.Split "/") |> List.filter (fun part -> part <> "") with
+        | "#" :: _ :: rest -> 
+            let token = (String.concat "" rest).Replace("%2F", "/")
+            let currentUrl = Router.currentUrl()
+            match canonicalToken token, currentUrl with
+            | Some canonicalToken, (schema :: version :: rest) when schema <> "diff" -> 
+                Html.a [
+                    prop.href (Router.format(schema, version, [ "type", canonicalToken ]))
+                    prop.text (memberName canonicalToken)
+                ]
+            | _ ->
+                Html.text (memberName token)
+
+        | package :: version :: "schema.json#" :: ("types" | "resources") :: rest ->
+            let token = (String.concat "" rest).Replace("%2F", "/")
+            match canonicalToken token with
+            | Some canonicalToken -> 
+                Html.a [
+                    prop.href (Router.format(package, version, [ "type", canonicalToken ]))
+                    prop.text (memberName canonicalToken)
+                ]
+            | _ ->
+                Html.text (memberName token)
+
+        | _ -> 
+            Html.text $"Ref: {reference}"
+
     | SchemaType.Output elementType -> RenderType elementType
     | SchemaType.Map elementType ->
         let renderedElementType = RenderType elementType
@@ -569,7 +614,10 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
 
 [<ReactComponent>]
 let PluginSchemaExplorer(name: string, version: string, tab: string) =
-    let schema = React.useDeferred(schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, [| name; version |])
+    let schema = React.useDeferred(
+        schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, 
+        [| name; version |])
+
     let selectedTab, setSelectedTab = React.useState(tab)
 
     React.fragment [
@@ -736,7 +784,9 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string, onIn
         Version = version
     }
 
-    let installation = React.useDeferred(schemaExplorerApi.installThirdPartyPlugin(requestInput()), [| owner; plugin; version |])
+    let installation = React.useDeferred(
+        schemaExplorerApi.installThirdPartyPlugin(requestInput()), 
+        [| owner; plugin; version |])
 
     let inline redirectWhenInstalled() =
         match installation with
@@ -843,6 +893,38 @@ let RenderResourceChanges(changes: ResourceChange list) =
                             prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
                             prop.children [
                                 MarkdownContent (defaultArg property.description "")
+                            ]
+                        ]
+
+                    | ResourceChange.MarkedDeprecated (name, property) -> 
+                        Html.i [ 
+                            prop.className "fas fa-exclamation-triangle"; 
+                            prop.style [ style.marginRight 10; style.color.darkGoldenRod ]
+                        ]
+
+                        Html.span [ 
+                            prop.style [ style.fontSize 18; style.marginRight 10; style.color.darkGoldenRod ]
+                            prop.children [
+                                Html.span [ 
+                                    prop.style [ style.color.darkGoldenRod; style.fontWeight.bold ]
+                                    prop.text "DEPRECATED" 
+                                ]
+                                Html.text $" {name} "
+                                Html.span [
+                                    prop.style [ style.color.black; style.fontSize 12 ]
+                                    prop.children [
+                                        Html.text "("
+                                        RenderType property.schemaType
+                                        Html.text ")"
+                                    ]
+                                ]
+                            ]
+                        ]
+
+                        Html.span [ 
+                            prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
+                            prop.children [
+                                MarkdownContent ("Deprecation message: " + defaultArg property.deprecationMessage "")
                             ]
                         ]
                 ]
@@ -997,6 +1079,61 @@ let PluginSchemaDiff(name, versionA, versionB) =
     ]
 
 [<ReactComponent>]
+let SchemaTypeExplorer(name, version, token) = 
+    let schema = React.useDeferred(
+        schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, 
+        [| name; version |])
+
+    match schema with 
+    | Deferred.HasNotStartedYet -> Html.none
+    | Deferred.InProgress -> 
+        Html.progress [
+            prop.className "progress is-small is-primary"
+            prop.max 100
+        ]
+
+    | Deferred.Failed error ->
+        Html.p [
+            prop.style [ style.color.red ]
+            prop.text error.Message
+        ]
+
+    | Deferred.Resolved (Error errorMessage) ->
+        Html.p [
+            prop.style [ style.color.darkOrchid ]
+            prop.text errorMessage
+        ]
+    
+    | Deferred.Resolved (Ok schema) ->
+        match schema.types |> Map.tryFind token with
+        | None -> 
+            match schema.resources |> Map.tryFind token with
+            | None -> 
+                Html.p [
+                    prop.style [ style.color.red ]
+                    prop.text $"Could not find type {token}"
+                ]
+
+            | Some resource -> 
+                ResourceInfo resource
+
+        | Some schemaTypeDef ->
+            React.fragment [
+                Html.p [
+                    prop.style [ style.color.black ]
+                    prop.className "title"
+                    prop.text (memberName token)
+                ]
+
+                MarkdownContent (defaultArg schemaTypeDef.description "")
+                match schemaTypeDef.schemaType with
+                | SchemaType.Object properties -> 
+                    RenderProperties properties
+                | _ -> 
+                    RenderType schemaTypeDef.schemaType
+            ]
+
+[<ReactComponent>]
 let View() =
     let (currentUrl, setCurrentUrl) = React.useState(Router.currentUrl())
     Html.div [
@@ -1063,6 +1200,8 @@ let View() =
                                         InstallThirdPartyPlugin(owner, name, version, onInstalled)
                                     | [ name; version ] ->
                                         PluginSchemaExplorer(name, version, "general")
+                                    | [ name; version; Route.Query [ "type", token ] ] ->
+                                        SchemaTypeExplorer(name, version, token)
                                     | _ ->
                                         Html.p "Select a plugin to explore"
                                 ]

@@ -155,7 +155,11 @@ let diffSchema (req: DiffSchemaRequest) =
                                 let propertyB = property.Value
                                 if not (Map.containsKey property.Key resourceA.properties) then
                                     ResourceChange.AddedProperty(propertyName, propertyB)
-                            
+                                else 
+                                    let propertyA = resourceA.properties.[property.Key]
+                                    if propertyA.deprecationMessage.IsNone && propertyB.deprecationMessage.IsSome then
+                                        ResourceChange.MarkedDeprecated(propertyName, propertyB)
+
                             for property in resourceA.properties do
                                 let propertyName = property.Key
                                 let propertyA = property.Value
@@ -169,6 +173,10 @@ let diffSchema (req: DiffSchemaRequest) =
                                 let propertyB = property.Value
                                 if not (Map.containsKey property.Key resourceA.inputProperties) then
                                     ResourceChange.AddedProperty(propertyName, propertyB)
+                                else 
+                                    let propertyA = resourceA.inputProperties.[property.Key]
+                                    if propertyA.deprecationMessage.IsNone && propertyB.deprecationMessage.IsSome then
+                                        ResourceChange.MarkedDeprecated(propertyName, propertyB)
 
                             for property in resourceA.inputProperties do
                                 let propertyName = property.Key
