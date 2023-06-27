@@ -468,6 +468,29 @@ let inline capitalize(input: string) =
 
 [<ReactComponent>]
 let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
+    let tfMappingDownloadError, setTfMappingDownloadError = React.useState<string option>(None)
+
+    let inline downloadSchemaJson() = async {
+        let! data = schemaExplorerApi.downloadRawSchema {
+            Plugin = name
+            Version = version
+        }
+
+        data.SaveFileAs $"{name}-{version}.json"
+    }
+
+    let inline downloadTerraformMapping() = async {
+        setTfMappingDownloadError None
+        let! response = schemaExplorerApi.downloadTerraformMapping {
+            Plugin = name
+            Version = version
+        }
+
+        match response with
+        | Ok data -> data.SaveFileAs $"tf-{name}-{version}.json"
+        | Error errorMessage -> setTfMappingDownloadError (Some errorMessage)
+    }
+
     React.fragment [
         Html.h1 [
             prop.style [ style.fontSize 24 ]
@@ -493,6 +516,29 @@ let GeneralSchemaInfo(name: string, version: string, schema: Schema) =
         match schema.license with
         | Some license -> Html.p $"License {license}"
         | None -> Html.none
+
+        Html.div [ prop.style [ style.marginTop 10  ] ]
+
+        Html.button [
+            prop.className "button is-primary"
+            prop.text "Download Raw Schema JSON"
+            prop.onClick (fun _ -> Async.StartImmediate(downloadSchemaJson()))
+        ]
+
+        Html.button [
+            prop.className "button is-primary"
+            prop.style [ style.marginLeft 10 ]
+            prop.text "Download Terraform Mapping for Schema"
+            prop.onClick (fun _ -> Async.StartImmediate(downloadTerraformMapping()))
+        ]
+
+        match tfMappingDownloadError with
+        | None -> Html.none
+        | Some errorMessage -> Html.p [
+            prop.style [ style.fontSize 18; style.marginTop 10 ]
+            prop.className "has-text-danger"
+            prop.text errorMessage
+        ]
     ]
 
 [<ReactComponent>]
@@ -687,7 +733,6 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
                 match schema.repository with
                 | Some repoUrl -> SchemaVersions(repoUrl, version, schema)
                 | None -> Html.none
-
 
             | otherwise -> Html.none
         ]

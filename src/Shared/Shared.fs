@@ -56,6 +56,21 @@ type RateLimited<'T> =
     | Response of 'T
     | RateLimitReached
 
+type GetRawSchemaRequest = {
+    Plugin: string
+    Version: string
+}
+
+type DownloadSchemaRequest = {
+    Plugin: string
+    Version: string
+}
+
+type DownloadTerraformMappingRequest = {
+    Plugin: string
+    Version: string
+}
+
 type ISchemaExplorerApi = {
     getLocalPlugins : unit -> Async<PluginReference list>
     getPulumiVersion : unit -> Async<string>
@@ -65,5 +80,8 @@ type ISchemaExplorerApi = {
     getReleaseNotes : GetReleaseNotesRequest -> Async<RateLimited<string>>
     installThirdPartyPlugin : InstallThirdPartyPluginRequest -> Async<Result<unit, string>>
     getSchemaVersionsFromGithub : GetSchemaVersionsRequest -> Async<RateLimited<string list>>
+    getRawSchemaJson : GetRawSchemaRequest -> Async<Result<string, string>>
+    downloadRawSchema : DownloadSchemaRequest -> Async<byte[]>
+    downloadTerraformMapping : DownloadTerraformMappingRequest -> Async<Result<byte[], string>>
     diffSchema : DiffSchemaRequest -> Async<Result<DiffResult, string>>
 }

@@ -116,10 +116,44 @@ let schemaFromPulumi(pluginName: string, version: string) = task {
     if output.ExitCode <> 0 then
         return Error output.StandardError
     else
-        return Ok (PulumiSchema.Parser.parseSchema output.StandardOutput)
+        return Ok output.StandardOutput
 }
 
-let getSchemaByPlugin(plugin: PluginReference) = schemaFromPulumi(plugin.Name, plugin.Version)
+let getMapping(key: string, pluginName: string, version: string) = task {
+    let tempFile = System.IO.Path.GetTempFileName()
+    try
+        let packageName = $"{pluginName}@{version}"
+        let! binary = pulumiCliBinary()
+        let! output =
+             Cli.Wrap(binary)
+                .WithArguments($"package get-mapping {key} {packageName} --out {tempFile}")
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync()
+
+        if output.ExitCode = 0 then
+            let! mappingBytes = System.IO.File.ReadAllBytesAsync(tempFile)
+            if mappingBytes.Length = 0 then
+                return Error $"Plugin {packageName} does not have a mapping for {key}"
+            else
+                return Ok mappingBytes
+        else
+            return Error output.StandardError
+    finally
+        IO.File.Delete tempFile
+}
+
+let getRawSchemaJson (request: GetRawSchemaRequest) =
+    schemaFromPulumi(request.Plugin, request.Version)
+
+let parseSchemaFromPulumi(pluginName: string, version: string) = task {
+    let! schema = schemaFromPulumi(pluginName, version)
+    return
+        match schema with
+        | Ok schema -> Ok (PulumiSchema.Parser.parseSchema schema)
+        | Error error -> Error error
+}
+
+let getSchemaByPlugin(plugin: PluginReference) = parseSchemaFromPulumi(plugin.Name, plugin.Version)
 
 let rec getReleaseNotes (req: GetReleaseNotesRequest) =
     task {
@@ -171,8 +205,8 @@ let rec getSchemaVersionsFromGithub (req: GetSchemaVersionsRequest) =
 
 let diffSchema (req: DiffSchemaRequest) =
     task {
-        let! schemaA = schemaFromPulumi(req.Plugin, req.VersionA)
-        let! schemaB = schemaFromPulumi(req.Plugin, req.VersionB)
+        let! schemaA = parseSchemaFromPulumi(req.Plugin, req.VersionA)
+        let! schemaB = parseSchemaFromPulumi(req.Plugin, req.VersionB)
 
         let emptyDiff = {
             AddedResources = [ ]
@@ -256,6 +290,17 @@ let getPulumiVersion() = task {
     return output.StandardOutput
 }
 
+let downloadRawSchema (request: DownloadSchemaRequest) = task {
+    let! schema = schemaFromPulumi(request.Plugin, request.Version)
+    match schema with
+    | Ok rawSchema -> return Text.Encoding.UTF8.GetBytes rawSchema
+    | Error error -> return [|  |]
+}
+
+let downloadTerraformMapping (request: DownloadTerraformMappingRequest) = task {
+    return! getMapping("terraform", request.Plugin, request.Version)
+}
+
 let schemaExplorerApi = {
     getLocalPlugins = getLocalPlugins >> Async.AwaitTask
     getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
@@ -266,6 +311,9 @@ let schemaExplorerApi = {
     getSchemaVersionsFromGithub = getSchemaVersionsFromGithub >> Async.AwaitTask
     diffSchema = diffSchema >> Async.AwaitTask
     getPulumiVersion = getPulumiVersion >> Async.AwaitTask
+    getRawSchemaJson = getRawSchemaJson >> Async.AwaitTask
+    downloadRawSchema = downloadRawSchema >> Async.AwaitTask
+    downloadTerraformMapping = downloadTerraformMapping >> Async.AwaitTask
 }
 
 let pulumiSchemaDocs = Remoting.documentation "Pulumi Schema Explorer" [ ]
