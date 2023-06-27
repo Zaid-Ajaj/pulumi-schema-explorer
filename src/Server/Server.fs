@@ -13,50 +13,89 @@ open Octokit
 
 let github = new GitHubClient(ProductHeaderValue "PulumiBot")
 
-let rec searchGithub (term: string) = 
+let githubClient() =
+    let githubToken = Environment.GetEnvironmentVariable "GITHUB_TOKEN"
+    if String.IsNullOrWhiteSpace(githubToken) then
+        github
+    else
+        github.Credentials <- Credentials(githubToken)
+        github
+
+let rec searchGithub (term: string) =
     task {
-        try 
+        try
             let request = SearchRepositoriesRequest term
-            let! searchResults = github.Search.SearchRepo(request)
-            let bestResults = 
+            let! searchResults = githubClient().Search.SearchRepo(request)
+            let bestResults =
                 searchResults.Items
                 |> Seq.map (fun repo -> repo.FullName)
 
-            return List.ofSeq bestResults
-        with 
-            | :? RateLimitExceededException as error -> 
-                do! Task.Delay 5000
-                return! searchGithub term
+            return RateLimited.Response(List.ofSeq bestResults)
+        with
+            | :? RateLimitExceededException as error ->
+                return RateLimited.RateLimitReached
     }
 
-let version (release: Release) = 
+let version (release: Release) =
     if not (String.IsNullOrWhiteSpace(release.Name)) then
         Some (release.Name.Substring(1, release.Name.Length - 1))
-    elif not (String.IsNullOrWhiteSpace(release.TagName)) then 
+    elif not (String.IsNullOrWhiteSpace(release.TagName)) then
         Some (release.TagName.Substring(1, release.TagName.Length - 1))
-    else 
+    else
         None
 
-let findGithubReleases (repo: string) = 
+let findGithubReleases (repo: string) =
     task {
-        match repo.Split "/" with 
-        | [| owner; repoName |] -> 
-            let! releases = github.Repository.Release.GetAll(owner, repoName)
-            return List.choose id [ for release in releases -> version release ]
-        | _ -> 
-            return []
+        try
+            match repo.Split "/" with
+            | [| owner; repoName |] ->
+                let! releases = githubClient().Repository.Release.GetAll(owner, repoName)
+                return
+                    List.choose id [ for release in releases -> version release ]
+                    |> RateLimited.Response
+            | _ ->
+                return
+                    RateLimited.Response []
+        with
+        | :? RateLimitExceededException as error ->
+               return RateLimited.RateLimitReached
     }
+
+let pulumiCliBinary() : Task<string> = task {
+    try
+        // try to get the version of pulumi installed on the system
+        let! version =
+            Cli.Wrap("pulumi")
+                .WithArguments("version")
+                .WithValidation(CommandResultValidation.ZeroExitCode)
+                .ExecuteAsync()
+
+        return "pulumi"
+    with
+    | _ ->
+        // when pulumi is not installed, try to get the version of of the dev build
+        // installed on the system using `make install` in the pulumi repo
+        let homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
+        let pulumiPath = System.IO.Path.Combine(homeDir, ".pulumi-dev", "bin", "pulumi")
+        if System.IO.File.Exists pulumiPath then
+            return pulumiPath
+        elif System.IO.File.Exists $"{pulumiPath}.exe" then
+            return $"{pulumiPath}.exe"
+        else
+            return "pulumi"
+}
 
 let getLocalPlugins() : Task<PluginReference list> =
     task {
-        let! command = Cli.Wrap("pulumi").WithArguments("plugin ls --json").ExecuteBufferedAsync()
-        if command.ExitCode = 0 then 
+        let! binary = pulumiCliBinary()
+        let! command = Cli.Wrap(binary).WithArguments("plugin ls --json").ExecuteBufferedAsync()
+        if command.ExitCode = 0 then
             let pluginsJson = JArray.Parse(command.StandardOutput)
-            return 
+            return
                 pluginsJson
                 |> Seq.cast<JObject>
                 |> Seq.filter (fun plugin -> plugin["kind"].ToObject<string>() = "resource")
-                |> Seq.map (fun plugin -> 
+                |> Seq.map (fun plugin ->
                     let name = plugin["name"].ToObject<string>()
                     let version = plugin["version"].ToObject<string>()
                     { Name = name; Version = version })
@@ -65,60 +104,75 @@ let getLocalPlugins() : Task<PluginReference list> =
             return []
     }
 
-let getSchemaByPlugin(plugin: PluginReference) =
-    task {
-        return PulumiSchema.SchemaLoader.FromPulumi(plugin.Name, plugin.Version)
-    }
+let schemaFromPulumi(pluginName: string, version: string) = task {
+    let packageName = $"{pluginName}@{version}"
+    let! binary = pulumiCliBinary()
+    let! output =
+         Cli.Wrap(binary)
+            .WithArguments($"package get-schema {packageName}")
+            .WithValidation(CommandResultValidation.None)
+            .ExecuteBufferedAsync()
 
-let rec getReleaseNotes (req: GetReleaseNotesRequest) = 
+    if output.ExitCode <> 0 then
+        return Error output.StandardError
+    else
+        return Ok (PulumiSchema.Parser.parseSchema output.StandardOutput)
+}
+
+let getSchemaByPlugin(plugin: PluginReference) = schemaFromPulumi(plugin.Name, plugin.Version)
+
+let rec getReleaseNotes (req: GetReleaseNotesRequest) =
     task {
         try
-            let! repository = github.Repository.Get(req.Owner, req.Repository)
-            let! releases = github.Repository.Release.GetAll(repository.Id)
+            let client = githubClient()
+            let! repository = client.Repository.Get(req.Owner, req.Repository)
+            let! releases = client.Repository.Release.GetAll(repository.Id)
             return
                 releases
                 |> Seq.tryFind (fun release -> version release = Some req.Version)
                 |> Option.map (fun release -> release.Body)
                 |> Option.defaultValue ""
+                |> RateLimited.Response
         with
-            | :? RateLimitExceededException -> 
-                do! Task.Delay 5000
-                return! getReleaseNotes req
+            | :? RateLimitExceededException ->
+                return RateLimited.RateLimitReached
     }
 
-let installThirdPartyPlugin (req: InstallThirdPartyPluginRequest) = 
+let installThirdPartyPlugin (req: InstallThirdPartyPluginRequest) =
     task {
-        let! command = 
-            Cli.Wrap("pulumi")
+        let! binary = pulumiCliBinary()
+        let! command =
+            Cli.Wrap(binary)
                .WithArguments($"plugin install resource {req.PluginName} {req.Version} --server github://api.github.com/{req.Owner}")
                .WithValidation(CommandResultValidation.None)
                .ExecuteBufferedAsync()
 
         if command.ExitCode = 0 then
             return Ok()
-        else    
+        else
             return Error(command.StandardError)
     }
 
-let rec getSchemaVersionsFromGithub (req: GetSchemaVersionsRequest) = 
+let rec getSchemaVersionsFromGithub (req: GetSchemaVersionsRequest) =
     task {
-        try 
-            let! repository = github.Repository.Get(req.Owner, req.Repository)
-            let! releases = github.Repository.Release.GetAll(repository.Id)
+        try
+            let client = githubClient()
+            let! repository = client.Repository.Get(req.Owner, req.Repository)
+            let! releases = client.Repository.Release.GetAll(repository.Id)
             return
                 releases
                 |> Seq.choose (fun release -> version release)
                 |> List.ofSeq
+                |> RateLimited.Response
         with
-            | :? RateLimitExceededException -> 
-                do! Task.Delay 5000
-                return! getSchemaVersionsFromGithub req
+            | :? RateLimitExceededException ->
+                return RateLimited.RateLimitReached
     }
 
-let diffSchema (req: DiffSchemaRequest) = 
+let diffSchema (req: DiffSchemaRequest) =
     task {
-        let schemaA = PulumiSchema.SchemaLoader.FromPulumi(req.Plugin, req.VersionA)
-        let schemaB = PulumiSchema.SchemaLoader.FromPulumi(req.Plugin, req.VersionB)
+        let! schemaA = schemaFromPulumi(req.Plugin, req.VersionA)
+        let! schemaB = schemaFromPulumi(req.Plugin, req.VersionB)
 
         let emptyDiff = {
             AddedResources = [ ]
@@ -131,7 +185,7 @@ let diffSchema (req: DiffSchemaRequest) =
         match schemaA, schemaB with
         | Error error, _ -> return Error error
         | _, Error error -> return Error error
-        | Ok schemaA, Ok schemaB -> 
+        | Ok schemaA, Ok schemaB ->
             let addedResources = [
                 for resource in schemaB.resources do
                     if not (Map.containsKey resource.Key schemaA.resources) then
@@ -149,13 +203,13 @@ let diffSchema (req: DiffSchemaRequest) =
                     let resourceA = resource.Value
                     if Map.containsKey resourceA.token schemaB.resources then
                         let resourceB = schemaB.resources.[resourceA.token]
-                        let outputsChanges = [ 
+                        let outputsChanges = [
                             for property in resourceB.properties do
                                 let propertyName = property.Key
                                 let propertyB = property.Value
                                 if not (Map.containsKey property.Key resourceA.properties) then
                                     ResourceChange.AddedProperty(propertyName, propertyB)
-                                else 
+                                else
                                     let propertyA = resourceA.properties.[property.Key]
                                     if propertyA.deprecationMessage.IsNone && propertyB.deprecationMessage.IsSome then
                                         ResourceChange.MarkedDeprecated(propertyName, propertyB)
@@ -173,7 +227,7 @@ let diffSchema (req: DiffSchemaRequest) =
                                 let propertyB = property.Value
                                 if not (Map.containsKey property.Key resourceA.inputProperties) then
                                     ResourceChange.AddedProperty(propertyName, propertyB)
-                                else 
+                                else
                                     let propertyA = resourceA.inputProperties.[property.Key]
                                     if propertyA.deprecationMessage.IsNone && propertyB.deprecationMessage.IsSome then
                                         ResourceChange.MarkedDeprecated(propertyName, propertyB)
@@ -184,19 +238,25 @@ let diffSchema (req: DiffSchemaRequest) =
                                 if not (Map.containsKey property.Key resourceB.inputProperties) then
                                     ResourceChange.RemovedProperty(propertyName, propertyA)
                         ]
-    
-                        if inputsChanges.Length > 0 || outputsChanges.Length > 0 then 
+
+                        if inputsChanges.Length > 0 || outputsChanges.Length > 0 then
                             yield { Resource = resourceA; Inputs = inputsChanges; Outputs = outputsChanges }
             ]
 
-            return Ok { 
-                emptyDiff with 
+            return Ok {
+                emptyDiff with
                     AddedResources = addedResources
                     RemovedResources = removedResources
                     ChangedResources = changedResources }
     }
 
-let schemaExplorerApi = { 
+let getPulumiVersion() = task {
+    let! binary = pulumiCliBinary()
+    let! output = Cli.Wrap(binary).WithArguments("version").ExecuteBufferedAsync()
+    return output.StandardOutput
+}
+
+let schemaExplorerApi = {
     getLocalPlugins = getLocalPlugins >> Async.AwaitTask
     getSchemaByPlugin = getSchemaByPlugin >> Async.AwaitTask
     searchGithub = searchGithub >> Async.AwaitTask
@@ -205,6 +265,7 @@ let schemaExplorerApi = {
     installThirdPartyPlugin = installThirdPartyPlugin >> Async.AwaitTask
     getSchemaVersionsFromGithub = getSchemaVersionsFromGithub >> Async.AwaitTask
     diffSchema = diffSchema >> Async.AwaitTask
+    getPulumiVersion = getPulumiVersion >> Async.AwaitTask
 }
 
 let pulumiSchemaDocs = Remoting.documentation "Pulumi Schema Explorer" [ ]

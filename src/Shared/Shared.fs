@@ -8,13 +8,13 @@ module Route =
 
 type PluginReference = { Name: string; Version: string }
 
-type GetReleaseNotesRequest = { 
+type GetReleaseNotesRequest = {
     Owner: string
     Repository: string
-    Version: string 
+    Version: string
 }
 
-type GetSchemaVersionsRequest = { 
+type GetSchemaVersionsRequest = {
     Owner: string
     Repository: string
 }
@@ -26,13 +26,13 @@ type InstallThirdPartyPluginRequest = {
 }
 
 type DiffSchemaRequest = {
-    Plugin: string 
+    Plugin: string
     VersionA: string
     VersionB: string
 }
 
 [<RequireQualifiedAccess>]
-type ResourceChange = 
+type ResourceChange =
     | AddedProperty of string * Property
     | RemovedProperty of string * Property
     | MarkedDeprecated of string * Property
@@ -51,13 +51,19 @@ type DiffResult = {
     ChangedResources: ChangedResource list
 }
 
-type ISchemaExplorerApi = { 
+[<RequireQualifiedAccess>]
+type RateLimited<'T> =
+    | Response of 'T
+    | RateLimitReached
+
+type ISchemaExplorerApi = {
     getLocalPlugins : unit -> Async<PluginReference list>
-    getSchemaByPlugin: PluginReference -> Async<Result<Schema, string>> 
-    searchGithub: string -> Async<string list>
-    findGithubReleases : string -> Async<string list> 
-    getReleaseNotes : GetReleaseNotesRequest -> Async<string>
+    getPulumiVersion : unit -> Async<string>
+    getSchemaByPlugin: PluginReference -> Async<Result<Schema, string>>
+    searchGithub: string -> Async<RateLimited<string list>>
+    findGithubReleases : string -> Async<RateLimited<string list>>
+    getReleaseNotes : GetReleaseNotesRequest -> Async<RateLimited<string>>
     installThirdPartyPlugin : InstallThirdPartyPluginRequest -> Async<Result<unit, string>>
-    getSchemaVersionsFromGithub : GetSchemaVersionsRequest -> Async<string list>
+    getSchemaVersionsFromGithub : GetSchemaVersionsRequest -> Async<RateLimited<string list>>
     diffSchema : DiffSchemaRequest -> Async<Result<DiffResult, string>>
 }

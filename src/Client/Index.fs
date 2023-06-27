@@ -166,18 +166,18 @@ let ExamplesDropdown(docs: Examples.Documentation) =
 [<ReactComponent>]
 let rec RenderType(schemaType) : ReactElement =
 
-    let canonicalToken (token: string) = 
+    let canonicalToken (token: string) =
         match token.Split("::") with
         | [| package; typeName |] -> Some (sprintf "%s:index:%s" package typeName)
         | _ ->
             match token.Split(":") with
-            | [| package; moduleName; typeName |] -> 
+            | [| package; moduleName; typeName |] ->
                 match moduleName.Split "/" with
                 | [| firstPart; secondPart |] -> Some (sprintf "%s:%s:%s" package firstPart typeName)
                 | _ -> Some (sprintf "%s:%s:%s" package moduleName typeName)
             | _ ->
                 None
-    
+
     match schemaType with
     | SchemaType.String -> Html.text "string"
     | SchemaType.Number -> Html.text "number"
@@ -192,17 +192,17 @@ let rec RenderType(schemaType) : ReactElement =
         Html.span [ Html.text "array<"; renderedElementType; Html.text">" ]
 
     | SchemaType.Ref reference ->
-        let memberName (token: string) = 
+        let memberName (token: string) =
             match token.Split ':' with
             | [| pkg; moduleName; memberName |] -> memberName
             | _ -> token
 
         match List.ofArray(reference.Split "/") |> List.filter (fun part -> part <> "") with
-        | "#" :: _ :: rest -> 
+        | "#" :: _ :: rest ->
             let token = (String.concat "" rest).Replace("%2F", "/")
             let currentUrl = Router.currentUrl()
             match canonicalToken token, currentUrl with
-            | Some canonicalToken, (schema :: version :: rest) when schema <> "diff" -> 
+            | Some canonicalToken, (schema :: version :: rest) when schema <> "diff" ->
                 Html.a [
                     prop.href (Router.format(schema, version, [ "type", canonicalToken ]))
                     prop.text (memberName canonicalToken)
@@ -213,7 +213,7 @@ let rec RenderType(schemaType) : ReactElement =
         | package :: version :: "schema.json#" :: ("types" | "resources") :: rest ->
             let token = (String.concat "" rest).Replace("%2F", "/")
             match canonicalToken token with
-            | Some canonicalToken -> 
+            | Some canonicalToken ->
                 Html.a [
                     prop.href (Router.format(package, version, [ "type", canonicalToken ]))
                     prop.text (memberName canonicalToken)
@@ -221,7 +221,7 @@ let rec RenderType(schemaType) : ReactElement =
             | _ ->
                 Html.text (memberName token)
 
-        | _ -> 
+        | _ ->
             Html.text $"Ref: {reference}"
 
     | SchemaType.Output elementType -> RenderType elementType
@@ -504,7 +504,7 @@ let ReleaseNotes(repository: string, version: string) =
             let request = { Owner = owner; Repository = repo; Version = version }
             return! schemaExplorerApi.getReleaseNotes request
         | _ ->
-            return ""
+            return RateLimited.Response ""
     }
 
     let releaseNotes = React.useDeferred(getReleaseNotes(), [| repository; version |])
@@ -517,7 +517,16 @@ let ReleaseNotes(repository: string, version: string) =
             prop.text (ex.Message)
         ]
 
-    | Deferred.Resolved releaseNotesBody ->
+    | Deferred.Resolved RateLimited.RateLimitReached ->
+        Html.p [
+            prop.style [ style.color "red" ]
+            prop.children [
+                Html.p "Rate limit reached when querying GitHub."
+                Html.p "Try again later or use a GITHUB_TOKEN environment variable to increase the rate limit."
+            ]
+        ]
+
+    | Deferred.Resolved (RateLimited.Response releaseNotesBody) ->
         Html.div [
             prop.className "content"
             prop.children [
@@ -526,7 +535,7 @@ let ReleaseNotes(repository: string, version: string) =
         ]
 
 [<ReactComponent>]
-let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) = 
+let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
     let fullRepoName = repository.Replace("https://", "").Replace("http://", "").Replace("github.com/", "")
     let inline getVersions() = async {
         match fullRepoName.Split "/" with
@@ -534,16 +543,16 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
             let request = { Owner = owner; Repository = repo }
             return! schemaExplorerApi.getSchemaVersionsFromGithub request
         | _ ->
-            return [ ]
+            return RateLimited.Response [ ]
     }
 
     let versions = React.useDeferred(getVersions(), [| repository |])
-    
-    match versions with 
-    | Deferred.HasNotStartedYet -> 
+
+    match versions with
+    | Deferred.HasNotStartedYet ->
         Html.none
 
-    | Deferred.InProgress -> 
+    | Deferred.InProgress ->
         Div("block", [
             Html.p "Loading versions"
             Html.progress [
@@ -558,7 +567,16 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
             prop.text (ex.Message)
         ]
 
-    | Deferred.Resolved versions ->
+    | Deferred.Resolved RateLimited.RateLimitReached ->
+        Html.p [
+            prop.style [ style.color "red" ]
+            prop.children [
+                Html.p "Rate limit reached when querying GitHub."
+                Html.p "Try again later or use a GITHUB_TOKEN environment variable to increase the rate limit."
+            ]
+        ]
+
+    | Deferred.Resolved (RateLimited.Response versions) ->
         Html.ul [
             for version in versions do
             let isCurrentVersion = version = schemaVersion
@@ -574,7 +592,7 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
                         prop.style [ style.marginRight 10 ]
                         prop.text "Explore"
                         prop.disabled isCurrentVersion
-                        prop.onClick (fun _ -> 
+                        prop.onClick (fun _ ->
                             match fullRepoName.Split "/" with
                             | [| "pulumi"; repoName |] when repoName.StartsWith "pulumi-" ->
                                 let firstPartyPulumiPlugin = repoName.Replace("pulumi-", "")
@@ -593,7 +611,7 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
                         prop.className [ "button"; if not isCurrentVersion then "is-primary" ]
                         prop.disabled isCurrentVersion
                         prop.text "Diff"
-                        prop.onClick (fun _ -> 
+                        prop.onClick (fun _ ->
                             match fullRepoName.Split "/" with
                             | [| "pulumi"; repoName |] when repoName.StartsWith "pulumi-" ->
                                 let firstPartyPulumiPlugin = repoName.Replace("pulumi-", "")
@@ -602,7 +620,7 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
                             | [| owner; repoName |] when repoName.StartsWith "pulumi-" ->
                                 let thirdPartyPulumiPlugin = repoName.Replace("pulumi-", "")
                                 Router.navigate("diff-third-party-plugin", owner, thirdPartyPulumiPlugin, schemaVersion, version)
-                            
+
                             | otherwise ->
                                 Router.navigate("unknown-pulumi-plugin")
                         )
@@ -615,7 +633,7 @@ let SchemaVersions(repository: string, schemaVersion: string, schema: Schema) =
 [<ReactComponent>]
 let PluginSchemaExplorer(name: string, version: string, tab: string) =
     let schema = React.useDeferred(
-        schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, 
+        schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version },
         [| name; version |])
 
     let selectedTab, setSelectedTab = React.useState(tab)
@@ -623,7 +641,7 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
     React.fragment [
         match schema with
         | Deferred.HasNotStartedYet -> Html.none
-        | Deferred.InProgress -> 
+        | Deferred.InProgress ->
             Div("block", [
                 Html.p "Loading schema information, this may take a moment..."
                 Html.progress [
@@ -650,7 +668,7 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
                 Tab($"Resources ({Map.count schema.resources})", "resources", selectedTab, setSelectedTab)
                 Tab($"Functions ({Map.count schema.functions})", "functions", selectedTab, setSelectedTab)
                 match schema.repository with
-                | Some repo -> 
+                | Some repo ->
                     Tab("Release Notes", "release-notes", selectedTab, setSelectedTab)
                     Tab("Versions", "versions", selectedTab, setSelectedTab)
                 | None -> Html.none
@@ -665,7 +683,7 @@ let PluginSchemaExplorer(name: string, version: string, tab: string) =
                 | Some repoUrl -> ReleaseNotes(repoUrl, version)
                 | None -> Html.none
 
-            | "versions" -> 
+            | "versions" ->
                 match schema.repository with
                 | Some repoUrl -> SchemaVersions(repoUrl, version, schema)
                 | None -> Html.none
@@ -680,12 +698,21 @@ let GithubReleases(repo: string) =
     let selectedRelease, setSelectedRelease = React.useState<string option>(None)
     let inline searchResults() =
         match githubReleases with
-        | Deferred.Resolved releases ->
+        | Deferred.Resolved (RateLimited.Response releases) ->
             [
                 for release in releases -> {
                     value = release
                     name = release
                     disabled = false
+                }
+            ]
+
+        | Deferred.Resolved RateLimited.RateLimitReached ->
+            [
+                {
+                   value = "rate-limit-reached"
+                   name = "Rate limit reached when querying GitHub"
+                   disabled = true
                 }
             ]
 
@@ -730,9 +757,17 @@ let SearchGithub() =
 
     let inline searchResultOptions() =
         match searchResults with
-        | Deferred.Resolved results ->
+        | Deferred.Resolved (RateLimited.Response results) ->
             [ for result in results -> { value = result; name = result; disabled = false } ]
 
+        | Deferred.Resolved RateLimited.RateLimitReached ->
+            [
+                {
+                  value = "rate-limit-reached"
+                  name = "Rate limit reached"
+                  disabled = true
+                }
+            ]
         | _ ->
             [ ]
 
@@ -785,7 +820,7 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string, onIn
     }
 
     let installation = React.useDeferred(
-        schemaExplorerApi.installThirdPartyPlugin(requestInput()), 
+        schemaExplorerApi.installThirdPartyPlugin(requestInput()),
         [| owner; plugin; version |])
 
     let inline redirectWhenInstalled() =
@@ -831,7 +866,7 @@ let InstallThirdPartyPlugin(owner: string, plugin: string, version: string, onIn
         Html.none
 
 [<ReactComponent>]
-let RenderResourceChanges(changes: ResourceChange list) = 
+let RenderResourceChanges(changes: ResourceChange list) =
     Html.ul [
         prop.style [ style.marginLeft 20 ]
         prop.children [
@@ -839,14 +874,14 @@ let RenderResourceChanges(changes: ResourceChange list) =
             Html.li [
                 prop.style [ style.marginBottom 10 ]
                 prop.children [
-                    match change with 
-                    | ResourceChange.AddedProperty (name, property) -> 
-                        Html.i [ 
-                            prop.className "fas fa-plus"; 
+                    match change with
+                    | ResourceChange.AddedProperty (name, property) ->
+                        Html.i [
+                            prop.className "fas fa-plus";
                             prop.style [ style.marginRight 10; style.color.green ]
                         ]
-                    
-                        Html.span [ 
+
+                        Html.span [
                             prop.style [ style.fontSize 18; style.marginRight 10; style.color.green ]
                             prop.children [
                                 Html.text $"{name} "
@@ -861,20 +896,20 @@ let RenderResourceChanges(changes: ResourceChange list) =
                             ]
                         ]
 
-                        Html.span [ 
+                        Html.span [
                             prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
                             prop.children [
                                 MarkdownContent (defaultArg property.description "")
                             ]
                         ]
 
-                    | ResourceChange.RemovedProperty (name, property) -> 
-                        Html.i [ 
-                            prop.className "fas fa-minus"; 
+                    | ResourceChange.RemovedProperty (name, property) ->
+                        Html.i [
+                            prop.className "fas fa-minus";
                             prop.style [ style.marginRight 10; style.color.red ]
                         ]
-                    
-                        Html.span [ 
+
+                        Html.span [
                             prop.style [ style.fontSize 18; style.marginRight 10; style.color.red ]
                             prop.children [
                                 Html.text $"{name} "
@@ -889,25 +924,25 @@ let RenderResourceChanges(changes: ResourceChange list) =
                             ]
                         ]
 
-                        Html.span [ 
+                        Html.span [
                             prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
                             prop.children [
                                 MarkdownContent (defaultArg property.description "")
                             ]
                         ]
 
-                    | ResourceChange.MarkedDeprecated (name, property) -> 
-                        Html.i [ 
-                            prop.className "fas fa-exclamation-triangle"; 
+                    | ResourceChange.MarkedDeprecated (name, property) ->
+                        Html.i [
+                            prop.className "fas fa-exclamation-triangle";
                             prop.style [ style.marginRight 10; style.color.darkGoldenRod ]
                         ]
 
-                        Html.span [ 
+                        Html.span [
                             prop.style [ style.fontSize 18; style.marginRight 10; style.color.darkGoldenRod ]
                             prop.children [
-                                Html.span [ 
+                                Html.span [
                                     prop.style [ style.color.darkGoldenRod; style.fontWeight.bold ]
-                                    prop.text "DEPRECATED" 
+                                    prop.text "DEPRECATED"
                                 ]
                                 Html.text $" {name} "
                                 Html.span [
@@ -921,7 +956,7 @@ let RenderResourceChanges(changes: ResourceChange list) =
                             ]
                         ]
 
-                        Html.span [ 
+                        Html.span [
                             prop.style [ style.fontSize 14; style.marginLeft 5; style.color.black ]
                             prop.children [
                                 MarkdownContent ("Deprecation message: " + defaultArg property.deprecationMessage "")
@@ -934,12 +969,12 @@ let RenderResourceChanges(changes: ResourceChange list) =
 
 
 [<ReactComponent>]
-let PluginSchemaDiff(name, versionA, versionB) = 
+let PluginSchemaDiff(name, versionA, versionB) =
     let selectedTab, setSelectedTab = React.useState "added-resources"
     let diffResults = React.useDeferred(
-        schemaExplorerApi.diffSchema { Plugin = name; VersionA = versionA; VersionB = versionB }, 
+        schemaExplorerApi.diffSchema { Plugin = name; VersionA = versionA; VersionB = versionB },
         [| name; versionA |])
-    
+
     React.fragment [
         Html.h1 [
             prop.className "subtitle"
@@ -950,9 +985,9 @@ let PluginSchemaDiff(name, versionA, versionB) =
             ]
         ]
 
-        match diffResults with 
+        match diffResults with
         | Deferred.HasNotStartedYet -> Html.none
-        | Deferred.InProgress -> 
+        | Deferred.InProgress ->
             Html.div [
                 prop.className "block"
                 prop.children [
@@ -986,54 +1021,54 @@ let PluginSchemaDiff(name, versionA, versionB) =
                 Tab($"Removed resources ({List.length diff.RemovedResources})", "removed-resources", selectedTab, setSelectedTab)
                 Tab($"Changed resources ({List.length diff.ChangedResources})", "changed-resources", selectedTab, setSelectedTab)
             ]
-            
+
             match selectedTab with
-            | "added-resources" -> 
+            | "added-resources" ->
                 Html.ul [
                     for resource in diff.AddedResources do
                     Html.li [
                         prop.style [ style.color.green ]
                         prop.children [
-                            Html.i [ 
-                                prop.className "fas fa-plus"; 
+                            Html.i [
+                                prop.className "fas fa-plus";
                                 prop.style [ style.marginRight 10 ]
                             ]
-                        
-                            Html.span [ 
+
+                            Html.span [
                                 prop.style [ style.fontSize 18; style.marginRight 10 ]
                                 prop.text (memberName resource.token)
                             ]
 
-                            Html.span [ 
+                            Html.span [
                                 prop.style [ style.fontSize 12; style.color.black ]
                                 prop.text (resource.token)
                             ]
                         ]
-                    ] 
+                    ]
                 ]
 
-            | "removed-resources" -> 
+            | "removed-resources" ->
                 Html.ul [
                     for resource in diff.RemovedResources do
                     Html.li [
                         prop.style [ style.color.red ]
                         prop.children [
-                            Html.i [ 
-                                prop.className "fas fa-minus"; 
+                            Html.i [
+                                prop.className "fas fa-minus";
                                 prop.style [ style.marginRight 10 ]
                             ]
-                        
-                            Html.span [ 
+
+                            Html.span [
                                 prop.style [ style.fontSize 18; style.marginRight 10 ]
                                 prop.text (memberName resource.token)
                             ]
 
-                            Html.span [ 
+                            Html.span [
                                 prop.style [ style.fontSize 14; style.color.black ]
                                 prop.text (resource.token)
                             ]
                         ]
-                    ] 
+                    ]
                 ]
 
             | "changed-resources" ->
@@ -1042,17 +1077,17 @@ let PluginSchemaDiff(name, versionA, versionB) =
                     Html.li [
                         prop.style [ style.color.darkGoldenRod; style.marginBottom 20 ]
                         prop.children [
-                            Html.i [ 
-                                prop.className "fas fa-exchange-alt"; 
+                            Html.i [
+                                prop.className "fas fa-exchange-alt";
                                 prop.style [ style.marginRight 10 ]
                             ]
 
-                            Html.span [ 
+                            Html.span [
                                 prop.style [ style.fontSize 18; style.marginRight 10 ]
                                 prop.text (memberName changedResource.Resource.token)
                             ]
 
-                            Html.span [ 
+                            Html.span [
                                 prop.style [ style.fontSize 12; style.color.black ]
                                 prop.text changedResource.Resource.token
                             ]
@@ -1074,19 +1109,19 @@ let PluginSchemaDiff(name, versionA, versionB) =
                     ]
                 ]
 
-            | _ -> 
+            | _ ->
                 Html.p "Unknown tab"
     ]
 
 [<ReactComponent>]
-let SchemaTypeExplorer(name, version, token) = 
+let SchemaTypeExplorer(name, version, token) =
     let schema = React.useDeferred(
-        schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version }, 
+        schemaExplorerApi.getSchemaByPlugin { Name = name; Version = version },
         [| name; version |])
 
-    match schema with 
+    match schema with
     | Deferred.HasNotStartedYet -> Html.none
-    | Deferred.InProgress -> 
+    | Deferred.InProgress ->
         Html.progress [
             prop.className "progress is-small is-primary"
             prop.max 100
@@ -1103,18 +1138,18 @@ let SchemaTypeExplorer(name, version, token) =
             prop.style [ style.color.darkOrchid ]
             prop.text errorMessage
         ]
-    
+
     | Deferred.Resolved (Ok schema) ->
         match schema.types |> Map.tryFind token with
-        | None -> 
+        | None ->
             match schema.resources |> Map.tryFind token with
-            | None -> 
+            | None ->
                 Html.p [
                     prop.style [ style.color.red ]
                     prop.text $"Could not find type {token}"
                 ]
 
-            | Some resource -> 
+            | Some resource ->
                 ResourceInfo resource
 
         | Some schemaTypeDef ->
@@ -1127,11 +1162,27 @@ let SchemaTypeExplorer(name, version, token) =
 
                 MarkdownContent (defaultArg schemaTypeDef.description "")
                 match schemaTypeDef.schemaType with
-                | SchemaType.Object properties -> 
+                | SchemaType.Object properties ->
                     RenderProperties properties
-                | _ -> 
+                | _ ->
                     RenderType schemaTypeDef.schemaType
             ]
+
+[<ReactComponent>]
+let PulumiTitleWithVersion() =
+    let response = React.useDeferred(schemaExplorerApi.getPulumiVersion(), [|  |])
+    match response with
+    | Deferred.Resolved version ->
+        Html.span [
+            prop.style [ style.marginTop 6 ]
+            prop.text $"Pulumi Schema Explorer | CLI {version}"
+        ]
+
+    | _ ->
+        Html.span [
+            prop.style [ style.marginTop 6 ]
+            prop.text "Pulumi Schema Explorer"
+        ]
 
 [<ReactComponent>]
 let View() =
@@ -1139,7 +1190,7 @@ let View() =
     Html.div [
         prop.style [ style.margin 20 ]
         prop.children [
-        
+
             Html.span [
                 prop.style [ style.fontSize 24; style.display.flex; style.justifyContent.left; style.alignContent.center ]
                 prop.children [
@@ -1148,10 +1199,7 @@ let View() =
                         prop.style [ style.height 50; style.marginRight 20 ]
                     ]
 
-                    Html.span [
-                        prop.style [ style.marginTop 6 ]
-                        prop.text "Pulumi Schema Explorer"
-                    ]
+                    PulumiTitleWithVersion()
                 ]
             ]
 
@@ -1190,7 +1238,7 @@ let View() =
                                     match currentUrl with
                                     | [ "unknown-pulumi-plugin" ] ->
                                         Html.p "Selected repository is not a Pulumi plugin"
-                                    | [ "diff"; name; versionA; verionB ] -> 
+                                    | [ "diff"; name; versionA; verionB ] ->
                                         PluginSchemaDiff(name, versionA, verionB)
                                     | [ "diff-third-party-plugin"; owner; name; versionA; versionB ] ->
                                         let onInstall() = Router.navigate("diff", name, versionA, versionB)
