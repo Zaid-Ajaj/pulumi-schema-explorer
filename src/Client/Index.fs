@@ -235,9 +235,18 @@ let rec RenderType(schemaType) : ReactElement =
 let RenderProperties(properties: Map<string, Property>) =
     Table [
         for (name, property) in Map.toList properties do
+            let requiredAsterisk = 
+                if property.required then 
+                    Html.span [ 
+                        prop.style [ style.color.red ]
+                        prop.text "*" 
+                    ]
+                else 
+                    Html.none
             Row [
                 Html.div [
                     Html.strong name
+                    requiredAsterisk
                     Html.br [ ]
                     RenderType property.schemaType
                 ]
@@ -345,7 +354,7 @@ let SchemaResources(name: string, version: string, schema: Schema) =
         )
         |> Seq.map (fun resource -> {
             value = resource.token
-            name = memberName resource.token
+            name = $"{memberName resource.token} ({resource.token})"
             disabled = false
         })
         |> Seq.toList
@@ -412,7 +421,7 @@ let SchemaFunctions(name: string, version: string, schema: Schema) =
         )
         |> Seq.map (fun func -> {
             value = func.token
-            name = memberName func.token
+            name = $"{memberName func.token} ({func.token})"
             disabled = false
         })
         |> Seq.toList

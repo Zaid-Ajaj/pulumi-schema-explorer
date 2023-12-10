@@ -64,15 +64,21 @@ let findGithubReleases (repo: string) =
 let pulumiCliBinary() : Task<string> = task {
     try
         // try to get the version of pulumi installed on the system
-        let! version =
+        let! pulumiVersionResult =
             Cli.Wrap("pulumi")
                 .WithArguments("version")
-                .WithValidation(CommandResultValidation.ZeroExitCode)
-                .ExecuteAsync()
+                .WithValidation(CommandResultValidation.None)
+                .ExecuteBufferedAsync()
 
-        return "pulumi"
+        let version = pulumiVersionResult.StandardOutput.Trim()
+        let versionRegex = Text.RegularExpressions.Regex("v[0-9]+\\.[0-9]+\\.[0-9]+")
+        if versionRegex.IsMatch version then
+            return "pulumi"
+        else
+            return! failwith "Pulumi not installed"
     with
-    | _ ->
+    | error ->
+        printfn "%A" error
         // when pulumi is not installed, try to get the version of of the dev build
         // installed on the system using `make install` in the pulumi repo
         let homeDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile)
